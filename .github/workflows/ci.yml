@@ -102,19 +102,19 @@ jobs:
         uses: aminya/setup-cpp@v1
         with:
           compiler: ${{ matrix.compiler }}
-          vcvarsall: ${{ contains(matrix.os, 'windows' )}}
+          # vcvarsall: ${{ contains(matrix.os, 'windows' )}}
 
           cmake: true
-          ninja: true
+          ninja: false
           vcpkg: false
-          ccache: true
+          ccache: false
           clangtidy: ${{ env.CLANG_TIDY_VERSION }}
 
 
-          cppcheck: true
+          cppcheck: false
 
-          # gcovr: true
-          # opencppcoverage: true
+          gcovr: false
+          opencppcoverage: false
 
       - name: Configure CMake
         run: |
