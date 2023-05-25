@@ -41,7 +41,6 @@ ilp_gaffer_movie_local_options()
 # Don't know if this should be set globally from here or not...
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-message(STATUS "${GIT_SHA}")
 set(GIT_SHA
     "Unknown"
     CACHE STRING "SHA this build was generated from")
@@ -50,7 +49,7 @@ string(
             0
             8
             GIT_SHORT_SHA)
-message(STATUS "${GIT_SHA}")
+message(STATUS "GIT_SHA: ${GIT_SHA}")
 
 target_compile_features(ilp_gaffer_movie_options INTERFACE cxx_std_${CMAKE_CXX_STANDARD})
 

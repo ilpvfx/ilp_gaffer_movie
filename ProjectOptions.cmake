@@ -6,7 +6,7 @@ include(CheckCXXCompilerFlag)
 
 macro(ilp_gaffer_movie_supports_sanitizers)
   if((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang.*" OR CMAKE_CXX_COMPILER_ID MATCHES ".*GNU.*"))
-    # NOTE(tohi): Disabling because cannot find lib
+    # NOTE(tohi): Disabling because cannot find libasan/libubsan
     #
     set(SUPPORTS_UBSAN OFF)
     # set(SUPPORTS_UBSAN ON)
