@@ -19,7 +19,7 @@
 include(FindPackageHandleStandardArgs)
 
 find_library(Gaffer_LIBRARIES
-        NAMES Gaffer GafferScene
+        NAMES Gaffer 
         PATHS ${GAFFER_ROOT}/lib $ENV{GAFFER_ROOT}/lib
         DOC "Gaffer library")
 find_path(Gaffer_INCLUDE_DIR 
@@ -63,8 +63,10 @@ if(Gaffer_FOUND AND NOT TARGET Gaffer::Gaffer)
     set_property(TARGET Gaffer::Gaffer PROPERTY IMPORTED_LOCATION ${Gaffer_LIBRARIES})
     set_property(TARGET Gaffer::Gaffer PROPERTY IMPORTED_NO_SONAME TRUE)
     set_property(TARGET Gaffer::Gaffer PROPERTY VERSION ${Gaffer_VERSION})
-    target_include_directories(Gaffer::Gaffer INTERFACE ${Gaffer_INCLUDE_DIR})
+    target_include_directories(Gaffer::Gaffer SYSTEM INTERFACE ${Gaffer_INCLUDE_DIR})
     #add_library(Gaffer::Gaffer SHARED IMPORTED GLOBAL)
     #set_target_properties(Gaffer::Gaffer PROPERTIES IMPORTED_NO_SONAME TRUE)
     #set_target_properties(Gaffer::Gaffer PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${ARNOLD_INCLUDE_DIR})
+
+    # TODO: Setup targets Gaffer::GafferScene, etc.
 endif()

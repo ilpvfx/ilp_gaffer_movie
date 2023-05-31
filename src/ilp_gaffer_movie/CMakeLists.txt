@@ -6,14 +6,15 @@ add_library(ilp_gaffer_movie SHARED
 add_library(ilp_gaffer_movie::ilp_gaffer_movie 
   ALIAS ilp_gaffer_movie)
 
-# target_link_libraries(ilp_gaffer_movie 
-#   PUBLIC 
-#     gaffer::gaffer)
+target_link_libraries(ilp_gaffer_movie 
+  PUBLIC 
+    Gaffer::Gaffer
+    GafferScene 
+    IECore)
 target_link_libraries(ilp_gaffer_movie 
   PRIVATE 
     ilp_gaffer_movie_options 
-    ilp_gaffer_movie_warnings
-    Gaffer::Gaffer)
+    ilp_gaffer_movie_warnings)
 
 target_include_directories(ilp_gaffer_movie ${WARNING_GUARD} 
   PUBLIC 
@@ -24,13 +25,20 @@ target_compile_features(ilp_gaffer_movie
   PUBLIC 
     cxx_std_17)
 
+target_compile_definitions(ilp_gaffer_movie
+  PUBLIC 
+    BOOST_SIGNALS_NO_DEPRECATION_WARNING=1 
+    BOOST_BIND_GLOBAL_PLACEHOLDERS
+    _GLIBCXX_USE_CXX11_ABI=0
+)
+
 set_target_properties(
   ilp_gaffer_movie
   PROPERTIES 
     VERSION ${PROJECT_VERSION}
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
-    # POSITION_INDEPENDENT_CODE ON # Always PIC
+    #CXX_VISIBILITY_PRESET hidden
+    #VISIBILITY_INLINES_HIDDEN YES
+    POSITION_INDEPENDENT_CODE ON # Always PIC
 )
 
 generate_export_header(ilp_gaffer_movie 
@@ -42,3 +50,8 @@ target_include_directories(ilp_gaffer_movie PRIVATE "${CMAKE_BINARY_DIR}/configu
 # if(NOT BUILD_SHARED_LIBS)
 #   target_compile_definitions(ilp_gaffer_movie PUBLIC ILP_GAFFER_MOVIE_STATIC_DEFINE)
 # endif()
+
+# 
+# Install.
+#
+install(TARGETS ilp_gaffer_movie DESTINATION lib)

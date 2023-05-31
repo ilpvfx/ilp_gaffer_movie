@@ -16,16 +16,21 @@ macro(ilp_gaffer_movie_supports_sanitizers)
 endmacro()
 
 macro(ilp_gaffer_movie_setup_options)
-  #option(ilp_gaffer_movie_ENABLE_HARDENING "Enable hardening" ON)
   option(ilp_gaffer_movie_ENABLE_COVERAGE "Enable coverage reporting" OFF)
-  cmake_dependent_option(
-    ilp_gaffer_movie_ENABLE_GLOBAL_HARDENING
-    "Attempt to push hardening options to built dependencies"
-    ON
-    ilp_gaffer_movie_ENABLE_HARDENING
-    OFF)
 
-  ilp_gaffer_movie_supports_sanitizers()
+  # NOTE(tohi): Skip hardening for now...
+  #
+  # option(ilp_gaffer_movie_ENABLE_HARDENING "Enable hardening" ON)
+  # cmake_dependent_option(
+  #   ilp_gaffer_movie_ENABLE_GLOBAL_HARDENING
+  #   "Attempt to push hardening options to built dependencies"
+  #   ON
+  #   ilp_gaffer_movie_ENABLE_HARDENING
+  #   OFF)
+
+  # NOTE(tohi): Skip sanitizers for now...
+  #
+  # ilp_gaffer_movie_supports_sanitizers()
 
   if(NOT PROJECT_IS_TOP_LEVEL OR ilp_gaffer_movie_PACKAGING_MAINTAINER_MODE)
     option(ilp_gaffer_movie_ENABLE_IPO "Enable IPO/LTO" OFF)
@@ -91,7 +96,9 @@ macro(ilp_gaffer_movie_global_options)
     ilp_gaffer_movie_enable_ipo()
   endif()
 
-  ilp_gaffer_movie_supports_sanitizers()
+  # NOTE(tohi): Skip sanitizers for now...
+  #
+  # ilp_gaffer_movie_supports_sanitizers()
 
   # NOTE(tohi): Skip hardening for now...
   #
@@ -128,21 +135,27 @@ macro(ilp_gaffer_movie_local_options)
     ""
     "")
 
-  if(ilp_gaffer_movie_ENABLE_USER_LINKER)
-    include(cmake/Linker.cmake)
-    configure_linker(ilp_gaffer_movie_options)
-  endif()
+  # NOTE(tohi): Use default linker for now...
+  #
+  # if(ilp_gaffer_movie_ENABLE_USER_LINKER)
+  #   include(cmake/Linker.cmake)
+  #   configure_linker(ilp_gaffer_movie_options)
+  # endif()
 
-  include(cmake/Sanitizers.cmake)
-  ilp_gaffer_movie_enable_sanitizers(
-    ilp_gaffer_movie_options
-    ${ilp_gaffer_movie_ENABLE_SANITIZER_ADDRESS}
-    ${ilp_gaffer_movie_ENABLE_SANITIZER_LEAK}
-    ${ilp_gaffer_movie_ENABLE_SANITIZER_UNDEFINED}
-    ${ilp_gaffer_movie_ENABLE_SANITIZER_THREAD}
-    ${ilp_gaffer_movie_ENABLE_SANITIZER_MEMORY})
+  # NOTE(tohi): Skip sanitizers for now...
+  #
+  # include(cmake/Sanitizers.cmake)
+  # ilp_gaffer_movie_enable_sanitizers(
+  #   ilp_gaffer_movie_options
+  #   ${ilp_gaffer_movie_ENABLE_SANITIZER_ADDRESS}
+  #   ${ilp_gaffer_movie_ENABLE_SANITIZER_LEAK}
+  #   ${ilp_gaffer_movie_ENABLE_SANITIZER_UNDEFINED}
+  #   ${ilp_gaffer_movie_ENABLE_SANITIZER_THREAD}
+  #   ${ilp_gaffer_movie_ENABLE_SANITIZER_MEMORY})
 
-  set_target_properties(ilp_gaffer_movie_options PROPERTIES UNITY_BUILD ${ilp_gaffer_movie_ENABLE_UNITY_BUILD})
+  # NOTE(tohi): Skip unity build for now...
+  #
+  # set_target_properties(ilp_gaffer_movie_options PROPERTIES UNITY_BUILD ${ilp_gaffer_movie_ENABLE_UNITY_BUILD})
 
   if(ilp_gaffer_movie_ENABLE_PCH)
     target_precompile_headers(

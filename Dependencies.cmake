@@ -13,11 +13,16 @@ function(ilp_gaffer_movie_setup_dependencies)
   # endif()
 
   if(NOT TARGET Gaffer::Gaffer)
-    cpmaddpackage(
-      NAME          
-        gaffer
-      URL 
-        https://github.com/GafferHQ/gaffer/releases/download/1.2.0.2/gaffer-1.2.0.2-linux.tar.gz
+    CPMAddPackage(
+      NAME gaffer
+      URL https://github.com/GafferHQ/gaffer/releases/download/1.2.0.2/gaffer-1.2.0.2-linux.tar.gz
+      VERSION 1.2.0.2
+    )      
+      #DOWNLOAD_ONLY True
+#      NAME          
+#        gaffer
+#      URL 
+#        "https://github.com/GafferHQ/gaffer/releases/download/1.2.0.2/gaffer-1.2.0.2-linux.tar.gz"
       # VERSION       
       #  1.2.0.2
       # GIT_TAG         
@@ -26,9 +31,10 @@ function(ilp_gaffer_movie_setup_dependencies)
       #   "GafferHQ/gaffer"
       # DOWNLOAD_ONLY 
       #   TRUE
-    )
+#    )
 
-    set(GAFFER_ROOT ${gaffer_SOURCE_DIR})
+    #set(GAFFER_ROOT ${gaffer_SOURCE_DIR})
+    message(STATUS "GAFFER_ROOT: ${GAFFER_ROOT}")
     find_package(Gaffer)
 
     # Create imported target.
@@ -75,5 +81,23 @@ function(ilp_gaffer_movie_setup_dependencies)
   # if(NOT TARGET tools::tools)
   #   cpmaddpackage("gh:lefticus/tools#update_build_system")
   # endif()
+
+  #
+  # Find FFmpeg.
+  #
+  if(NOT TARGET PkgConfig::LIBAV)
+    find_package(PkgConfig REQUIRED)
+    message(STATUS "FFMPEG_ROOT: ${FFMPEG_ROOT}")
+    set(ENV{PKG_CONFIG_PATH} "${FFMPEG_ROOT}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+        libavcodec
+        libavdevice
+        libavfilter
+        libavformat
+        libavutil
+        libpostproc
+        libswresample
+        libswscale)
+  endif()
 
 endfunction()

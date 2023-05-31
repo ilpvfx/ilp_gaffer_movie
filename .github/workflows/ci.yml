@@ -10,7 +10,7 @@ on:
       - develop
 
 env:
-  CLANG_TIDY_VERSION: "15.0.2"
+  CLANG_TIDY_VERSION: "10.0.1"
   VERBOSE: 1
 
 
@@ -31,8 +31,7 @@ jobs:
       # and your own projects needs
       matrix:
         compiler:
-          # you can specify the version after `-` like "llvm-15.0.2".
-          #- llvm-15.0.2
+          # These are the installed compilers in the ASWF image specified above.
           - gcc-9.3.1
           - clang-10.0.1
         generator: 

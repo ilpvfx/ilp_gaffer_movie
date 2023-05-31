@@ -7,7 +7,9 @@
 #include <GafferDispatch/TaskNode.h>
 #include <GafferImage/ImagePlug.h>
 
-#include "ilp_gaffer_movie_writer/type_id.h"
+//#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
+#include <ilp_gaffer_movie/type_id.hpp>
+
 
 // ENV
 // export IECORE_LOG_LEVEL=Info
@@ -24,18 +26,19 @@ IE_CORE_FORWARDDECLARE(ValuePlug)
 namespace GafferImage {
 // IE_CORE_FORWARDDECLARE(ColorSpace)
 IE_CORE_FORWARDDECLARE(ImagePlug)
-} // namespace GafferImage
+}// namespace GafferImage
 
-namespace IlpGafferMovieWriter {
+namespace IlpGafferMovie {
 
-class MovieWriterSequential : public GafferDispatch::TaskNode {
+class MovieWriter : public GafferDispatch::TaskNode
+{
 public:
-  MovieWriterSequential(const std::string &name = defaultName<MovieWriterSequential>());
-  ~MovieWriterSequential() override = default;
+  MovieWriter(const std::string &name = defaultName<MovieWriter>());
+  ~MovieWriter() override = default;
 
-  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovieWriter::MovieWriterSequential,
-                           TypeId::kIlpGafferMovieWriterSequentialTypeId,
-                           GafferDispatch::TaskNode)
+  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::MovieWriter,
+    TypeId::kMovieWriterTypeId,
+    GafferDispatch::TaskNode)
 
   IECore::MurmurHash hash(const Gaffer::Context *context) const override;
 
@@ -80,7 +83,7 @@ protected:
 
   void executeSequence(const std::vector<float> &frames) const override;
 
-  // Re-implemented to return true, since the entire file must be written at once.
+  // Re-implemented to return true, since the entire movie file must be written at once.
   bool requiresSequenceExecution() const override;
 
 private:
@@ -90,7 +93,6 @@ private:
   friend struct GafferDispatchBindings::Detail::TaskNodeAccessor;
 };
 
-IE_CORE_DECLAREPTR(MovieWriterSequential)
+IE_CORE_DECLAREPTR(MovieWriter)
 
-} // namespace IlpGafferMovieWriter
-
+}// namespace IlpGafferMovie
