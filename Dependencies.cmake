@@ -39,18 +39,18 @@ function(ilp_gaffer_movie_setup_dependencies)
   # Find FFmpeg.
   #
   if(NOT TARGET PkgConfig::LIBAV)
-    find_package(PkgConfig REQUIRED)
-    message(STATUS "FFMPEG_ROOT: ${FFMPEG_ROOT}")
-    set(ENV{PKG_CONFIG_PATH} "${FFMPEG_ROOT}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
-        libavcodec
-        libavdevice
-        libavfilter
-        libavformat
-        libavutil
-        libpostproc
-        libswresample
-        libswscale)
+    # find_package(PkgConfig REQUIRED)
+    # message(STATUS "FFMPEG_ROOT: ${FFMPEG_ROOT}")
+    # set(ENV{PKG_CONFIG_PATH} "${FFMPEG_ROOT}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+    # pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+    #     libavcodec
+    #     libavdevice
+    #     libavfilter
+    #     libavformat
+    #     libavutil
+    #     libpostproc
+    #     libswresample
+    #     libswscale)
   endif()
 
   # if(NOT TARGET spdlog::spdlog)
