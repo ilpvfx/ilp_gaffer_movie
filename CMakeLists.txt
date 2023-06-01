@@ -27,22 +27,11 @@ include(cmake/PreventInSourceBuilds.cmake)
 # ilp_gaffer_movie_setup_options()
 # ilp_gaffer_movie_global_options()
 
-# include(Dependencies.cmake)
-# ilp_gaffer_movie_setup_dependencies()
+include(Dependencies.cmake)
+ilp_gaffer_movie_setup_dependencies()
 
 # ilp_gaffer_movie_local_options()
 
-find_package(Gaffer 
-  REQUIRED 
-  COMPONENTS
-    Gaffer
-    GafferBindings
-    GafferScene
-    IECore
-    IECorePython
-    boost_python 
-    python
-  )
 
 # Build the library.
 add_library(IlpGafferMovie SHARED 
@@ -78,12 +67,11 @@ target_compile_definitions(IlpGafferMovieModule
     BOOST_SIGNALS_NO_DEPRECATION_WARNING=1 
     BOOST_BIND_GLOBAL_PLACEHOLDERS
     _GLIBCXX_USE_CXX11_ABI=0)
-target_link_libraries(IlpGafferMovieModule 
-  IlpGafferMovie)
 target_include_directories(IlpGafferMovieModule 
   PRIVATE 
     include)
 target_link_libraries(IlpGafferMovieModule 
+  IlpGafferMovie
   Gaffer::GafferBindings 
   Gaffer::IECorePython 
   Gaffer::boost_python
