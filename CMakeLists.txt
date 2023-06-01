@@ -32,6 +32,18 @@ include(cmake/PreventInSourceBuilds.cmake)
 
 # ilp_gaffer_movie_local_options()
 
+find_package(Gaffer 
+  REQUIRED 
+  COMPONENTS
+    Gaffer
+    GafferBindings
+    GafferScene
+    IECore
+    IECorePython
+    boost_python 
+    python
+  )
+
 # Build the library.
 add_library(IlpGafferMovie SHARED 
   src/ilp_gaffer_movie/movie_reader.cpp
@@ -40,9 +52,6 @@ add_library(IlpGafferMovie SHARED
 #   PROPERTIES 
 #     PREFIX "" 
 #     OUTPUT_NAME "IlpGafferMovie")
-target_link_directories(IlpGafferMovie
-  PUBLIC
-    ${GAFFER_ROOT}/lib)
 target_compile_definitions(IlpGafferMovie 
   PRIVATE 
     BOOST_SIGNALS_NO_DEPRECATION_WARNING=1 
@@ -50,18 +59,14 @@ target_compile_definitions(IlpGafferMovie
     _GLIBCXX_USE_CXX11_ABI=0)
 target_include_directories(IlpGafferMovie 
   PRIVATE 
-    include 
-    ${GAFFER_ROOT}/include)
+    include)
 target_link_libraries(IlpGafferMovie 
-  Gaffer 
-  GafferScene 
-  IECore)
+  Gaffer::Gaffer 
+  Gaffer::GafferScene 
+  Gaffer::IECore)
 install(TARGETS IlpGafferMovie DESTINATION lib)
 
 # Build the python bindings.
-string(REPLACE "." "" PYTHON_VERSION_STRIPPED ${PYTHON_VERSION})
-string(REPLACE "3.7" "3.7m" PYTHON_FOLDER ${PYTHON_VERSION})
-
 add_library(IlpGafferMovieModule SHARED 
   src/ilp_gaffer_movie_module/ilp_gaffer_movie_module.cpp)
 set_target_properties(IlpGafferMovieModule 
@@ -77,14 +82,12 @@ target_link_libraries(IlpGafferMovieModule
   IlpGafferMovie)
 target_include_directories(IlpGafferMovieModule 
   PRIVATE 
-    include 
-    ${GAFFER_ROOT}/include 
-    ${GAFFER_ROOT}/include/python${PYTHON_FOLDER})
+    include)
 target_link_libraries(IlpGafferMovieModule 
-  GafferBindings 
-  IECorePython 
-  boost_python${PYTHON_VERSION_STRIPPED} 
-  python${PYTHON_FOLDER})
+  Gaffer::GafferBindings 
+  Gaffer::IECorePython 
+  Gaffer::boost_python
+  Gaffer::python)
 install(TARGETS IlpGafferMovieModule DESTINATION python/IlpGafferMovie)
 
 # Build the python modules.
