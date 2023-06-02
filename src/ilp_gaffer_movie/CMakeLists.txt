@@ -33,6 +33,9 @@ target_compile_definitions(IlpGafferMovie
 #     PUBLIC 
 #       ILPGAFFERMOVIE_STATIC_DEFINE)
 # endif()
+target_link_libraries(IlpGafferMovie
+  PUBLIC
+    ilp_mux)
 target_link_system_libraries(IlpGafferMovie 
   PUBLIC
     Gaffer::Gaffer 
