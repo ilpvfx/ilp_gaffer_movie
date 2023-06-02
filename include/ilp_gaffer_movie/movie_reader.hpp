@@ -8,7 +8,7 @@
 #include <GafferImage/ImagePlug.h>
 
 #include <ilp_gaffer_movie/type_id.hpp>
-// #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
+#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 
 // ENV
 // export IECORE_LOG_LEVEL=Info
@@ -29,7 +29,7 @@ IE_CORE_FORWARDDECLARE(ImagePlug)
 
 namespace IlpGafferMovie {
 
-class MovieReader : public GafferDispatch::TaskNode
+class ILPGAFFERMOVIE_EXPORT MovieReader : public GafferDispatch::TaskNode
 {
 public:
   MovieReader(const std::string &name = defaultName<MovieReader>());

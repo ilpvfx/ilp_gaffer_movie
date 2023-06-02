@@ -1,20 +1,3 @@
-cmake_minimum_required(VERSION 3.15...3.23)
-
-project(CmakeConfigPackageTests LANGUAGES CXX)
-
-# ---- Test as standalone project the exported config package ----
-
-if(PROJECT_IS_TOP_LEVEL OR TEST_INSTALLED_VERSION)
-  enable_testing()
-
-  find_package(myproject CONFIG REQUIRED) # for intro, project_options, ...
-
-  if(NOT TARGET myproject_options)
-    message(FATAL_ERROR "Required config package not found!")
-    return() # be strictly paranoid for Template Janitor github action! CK
-  endif()
-endif()
-
 # ---- Dependencies ----
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
@@ -38,8 +21,7 @@ add_executable(tests tests.cpp)
 target_link_libraries(tests
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
           ilp_gaffer_movie::ilp_gaffer_movie_options
-          ilp_gaffer_movie::ilp_gaffer_movie
-          #gaffer::gaffer
+          IlpGafferMovie
           Catch2::Catch2WithMain)
 
 # Automatically discover tests that are defined in catch based test files you can modify the unittests. Set TEST_PREFIX
@@ -62,11 +44,7 @@ add_executable(constexpr_tests constexpr_tests.cpp)
 target_link_libraries(constexpr_tests
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
           ilp_gaffer_movie::ilp_gaffer_movie_options
-          ilp_gaffer_movie::ilp_gaffer_movie
-          #gaffer::gaffer
-          #Gaffer 
-          #GafferScene 
-          #IECore
+          IlpGafferMovie
           Catch2::Catch2WithMain)
 
 catch_discover_tests(
@@ -88,8 +66,7 @@ add_executable(relaxed_constexpr_tests constexpr_tests.cpp)
 target_link_libraries(relaxed_constexpr_tests
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
           ilp_gaffer_movie::ilp_gaffer_movie_options
-          ilp_gaffer_movie::ilp_gaffer_movie
-          #gaffer::gaffer
+          IlpGafferMovie
           Catch2::Catch2WithMain)
 target_compile_definitions(relaxed_constexpr_tests PRIVATE -DCATCH_CONFIG_RUNTIME_STATIC_REQUIRE)
 

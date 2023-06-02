@@ -122,10 +122,6 @@ else()
   endif()
 endif()
 
-# Additionally try and use pkconfig to find IlmBase
-#find_package(PkgConfig)
-#pkg_check_modules(PC_IlmBase QUIET IlmBase)
-
 # ------------------------------------------------------------------------
 #  Search for Gaffer include DIR
 # ------------------------------------------------------------------------
