@@ -7,6 +7,7 @@
 
 using namespace boost::python;
 
+// NOLINTBEGIN
 BOOST_PYTHON_MODULE(_IlpGafferMovie)
 {
   using MovieReaderWrapper = GafferDispatchBindings::TaskNodeWrapper<IlpGafferMovie::MovieReader>;
@@ -15,3 +16,4 @@ BOOST_PYTHON_MODULE(_IlpGafferMovie)
   using MovieWriterWrapper = GafferDispatchBindings::TaskNodeWrapper<IlpGafferMovie::MovieWriter>;
   GafferDispatchBindings::TaskNodeClass<IlpGafferMovie::MovieWriter, MovieWriterWrapper>();
 }
+// NOLINTEND
