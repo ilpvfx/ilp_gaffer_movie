@@ -19,6 +19,9 @@ env:
 jobs:
   Test:
     runs-on: ubuntu-20.04 
+    permissions:
+      contents: read
+      packages: read
     container:
       # image: aswf/ci-base:2022  
       image: ghcr.io/ilpvfx/ilp_gaffer_movie:main
