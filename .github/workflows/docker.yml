@@ -1,6 +1,8 @@
+# workflow_dispatch:
+
+
 name: Build Docker image
 on:
-  # workflow_dispatch:
   workflow_run: [ci]
   types:
     - requested
