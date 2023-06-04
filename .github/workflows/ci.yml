@@ -20,8 +20,9 @@ jobs:
   Test:
     runs-on: ubuntu-20.04 
     container:
-      image: aswf/ci-base:2022  
-      # image: ghcr.io/thinks/ilp_gaffer_movie
+      # image: aswf/ci-base:2022  
+      image: ghcr.io/ilpvfx/ilp_gaffer_movie:main
+
     strategy:
       fail-fast: false
 
