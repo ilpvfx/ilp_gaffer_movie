@@ -10,10 +10,12 @@ endif()
 # when compiling with PCH enabled.
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+file(STRINGS VERSION.txt version)
+
 # Set the project name and language.
 project(
   IlpGafferMovie
-  VERSION 0.0.1
+  VERSION ${version}
   DESCRIPTION ""
   #HOMEPAGE_URL "%%myurl%%"
   LANGUAGES CXX C)
