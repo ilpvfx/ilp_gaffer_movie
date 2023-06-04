@@ -89,12 +89,12 @@ jobs:
       #     script: |
       #       core.setFailed('There is a mismatch between configured llvm compiler and clang-tidy version chosen')
 
-      - name: Install FFmpeg
-        run: |
-          git clone https://github.com/piratecrew/rez-ffmpeg.git
-          mkdir rez-ffmpeg/build && cd rez-ffmpeg/build
-          cmake .. -DCMAKE_INSTALL_PREFIX=~/ffmpeg
-          make
+      # - name: Install FFmpeg
+      #   run: |
+      #     git clone https://github.com/piratecrew/rez-ffmpeg.git
+      #     mkdir rez-ffmpeg/build && cd rez-ffmpeg/build
+      #     cmake .. -DCMAKE_INSTALL_PREFIX=~/ffmpeg
+      #     make
 
       - uses: actions/checkout@v3
 
