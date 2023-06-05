@@ -12,8 +12,8 @@ on:
 env:
   CLANG_TIDY_VERSION: "10.0.1"
   PYTHON_VERSION: "3.7"
-  GAFFER_VERSION: "1.2.0.2"
-  FFMPEG_ROOT: "/opt/ffmpeg"
+  GAFFER_ROOT: "/opt/gaffer-1.2.0.2"
+  FFMPEG_ROOT: "/opt/ffmpeg-5.1"
   VERBOSE: 1
 
 
@@ -38,10 +38,10 @@ jobs:
       #   * make sure all supported configurations for your project are built
       #
       # Disable/enable builds in this list to meet the above recommendations
-      # and your own projects needs
+      # and your own projects needs.
       matrix:
         compiler:
-          # These are the installed compilers in the ASWF image specified above.
+          # These are the installed compilers in the container image specified above.
           - gcc-9.3.1
           - clang-10.0.1
         generator: 
