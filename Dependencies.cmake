@@ -11,17 +11,6 @@ function(ilp_gaffer_movie_setup_dependencies)
   # Find Gaffer.
   #
   if(NOT TARGET Gaffer::Gaffer)
-    if(GAFFER_ROOT AND GAFFER_VERSION)
-      message(FATAL_ERROR "Cannot provide GAFFER_ROOT and GAFFER_VERSION simultaneously")
-    endif()
-    if(NOT GAFFER_ROOT AND GAFFER_VERSION)
-      CPMAddPackage(
-        NAME gaffer
-        URL https://github.com/GafferHQ/gaffer/releases/download/${GAFFER_VERSION}/gaffer-${GAFFER_VERSION}-linux.tar.gz
-        VERSION ${GAFFER_VERSION}
-        DOWNLOAD_ONLY TRUE)      
-      set(GAFFER_ROOT ${gaffer_SOURCE_DIR})
-    endif()
     message(STATUS "GAFFER_ROOT: ${GAFFER_ROOT}")
     find_package(Gaffer 
       REQUIRED 

@@ -50,11 +50,11 @@ jobs:
         build_type:
           - Release
           - Debug
-        packaging_maintainer_mode:
-          - ON
-          - OFF
-        build_shared:
-          - OFF
+        # packaging_maintainer_mode:
+        #   - ON
+        #   - OFF
+        # build_shared:
+        #   - OFF
 
         #include:
           # Add appropriate variables for gcov version required. This will intentionally break
