@@ -136,8 +136,8 @@ jobs:
           -DCMAKE_BUILD_TYPE:STRING=${{matrix.build_type}} \
           -D${{ env.PROJECT_NAME }}_PACKAGING_MAINTAINER_MODE:BOOL=${{matrix.packaging_maintainer_mode}} \
           -D${{ env.PROJECT_NAME }}_ENABLE_COVERAGE:BOOL=${{ matrix.build_type == 'Debug' }} \
-          -DGAFFER_VERSION:STRING=${{ env.GAFFER_VERSION }} \
           -DPYTHON_VERSION:STRING=${{ env.PYTHON_VERSION }} \
+          -DGAFFER_ROOT:STRING=${{ env.GAFFER_ROOT }} \
           -DFFMPEG_ROOT=${{ env.FFMPEG_ROOT }} \
           -DGIT_SHA:STRING=${{ github.sha }}
 
