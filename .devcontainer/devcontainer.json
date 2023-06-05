@@ -22,7 +22,7 @@
 	// "mounts": [ "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind" ],
 
 	// Uncomment to connect as a non-root user if you've added one. See https://aka.ms/vscode-remote/containers/non-root.
-	//"remoteUser": "vscode",
+	"remoteUser": "vscode",
 
 	"mounts": [
 		//"source=${localEnv:HOME}/packages,target=/home/vscode/packages,type=bind,consistency=cached",

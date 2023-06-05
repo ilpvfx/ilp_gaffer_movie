@@ -24,9 +24,7 @@ jobs:
       contents: read
       packages: read
     container:
-      # image: aswf/ci-base:2022  
       image: ghcr.io/ilpvfx/ilp_gaffer_movie:main
-      # options: --user root
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

@@ -369,7 +369,7 @@ static void LogInfo(const char *msg)
   AVFilterContext *src_ctx,
   AVFilterContext *sink_ctx) -> bool
 {
-  assert(graph != nullptr);
+  assert(graph != nullptr); // NOLINT
 
   const unsigned int nb_filters = graph->nb_filters;
   AVFilterInOut *inputs = nullptr;
@@ -763,8 +763,8 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            assert(mux_ctx->h264.profile != nullptr);
-            assert(mux_ctx->h264.preset != nullptr);
+            assert(mux_ctx->h264.profile != nullptr); // NOLINT
+            assert(mux_ctx->h264.preset != nullptr); // NOLINT
             av_dict_set(enc_opt, "profile", mux_ctx->h264.profile, /*flags=*/0);
             av_dict_set(enc_opt, "preset", mux_ctx->h264.preset, /*flags=*/0);
             av_dict_set(enc_opt, "x264-params", mux_ctx->h264.x264_params, /*flags=*/0);
@@ -794,19 +794,19 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             }
 
             // clang-format off
-              assert(mux_ctx->pro_res.profile != nullptr);
-              int64_t p = -1;
-              if      (std::strcmp(mux_ctx->pro_res.profile, "proxy") == 0)    { p = 0; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "lt") == 0)       { p = 1; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "standard") == 0) { p = 2; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "hq") == 0)       { p = 3; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
-              else {
-                LogError("Could not configure ProRes profile");
-                return false;   
-              }
-              av_dict_set_int(enc_opt, "profile", p, /*flags=*/0);
+            assert(mux_ctx->pro_res.profile != nullptr); // NOLINT
+            int64_t p = -1;
+            if      (std::strcmp(mux_ctx->pro_res.profile, "proxy") == 0)    { p = 0; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "lt") == 0)       { p = 1; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "standard") == 0) { p = 2; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "hq") == 0)       { p = 3; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
+            else {
+              LogError("Could not configure ProRes profile");
+              return false;   
+            }
+            av_dict_set_int(enc_opt, "profile", p, /*flags=*/0);
             // clang-format on
 
             av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.vendor, /*flags=*/0);
