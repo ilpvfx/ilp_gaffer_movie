@@ -13,7 +13,7 @@ env:
   CLANG_TIDY_VERSION: "10.0.1"
   PYTHON_VERSION: "3.7"
   GAFFER_VERSION: "1.2.0.2"
-  FFMPEG_ROOT: "/home/vscode/ffmpeg"
+  FFMPEG_ROOT: "/opt/ffmpeg"
   VERBOSE: 1
 
 
