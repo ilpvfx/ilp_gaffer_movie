@@ -7,9 +7,9 @@
 #include <GafferDispatch/TaskNode.h>
 #include <GafferImage/ImagePlug.h>
 
-//#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
+// #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
+#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
-
 
 // ENV
 // export IECORE_LOG_LEVEL=Info
@@ -30,7 +30,7 @@ IE_CORE_FORWARDDECLARE(ImagePlug)
 
 namespace IlpGafferMovie {
 
-class MovieWriter : public GafferDispatch::TaskNode
+class ILPGAFFERMOVIE_EXPORT MovieWriter : public GafferDispatch::TaskNode
 {
 public:
   MovieWriter(const std::string &name = defaultName<MovieWriter>());

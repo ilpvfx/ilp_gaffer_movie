@@ -1,5 +1,6 @@
 #include <ilp_mux/mux.hpp>
 
+#include <array>
 #include <cassert>// assert
 #include <cstdio>// std::snprintf
 #include <cstring>// std::memcpy
@@ -29,7 +30,7 @@ extern "C" {
 static std::mutex mutex;
 static std::function<void(const char *)> MuxLog = [](const char * /*s*/) {};
 
-namespace IlpGafferMovieWriter {
+namespace ilp {
 
 struct MuxImpl
 {
@@ -57,7 +58,7 @@ struct MuxImpl
   // const AVCodec *video_codec = nullptr;
 };
 
-}// namespace IlpGafferMovieWriter
+}// namespace ilp
 
 namespace {
 
@@ -66,6 +67,10 @@ namespace {
 class Options
 {
 public:
+  Options(const Options &) = default;
+  Options &operator=(const Options &) = default;
+  Options(Options &&) = default;
+  Options &operator=(Options &&) = default;
   ~Options() noexcept
   {
     if (dict != nullptr) {
@@ -94,8 +99,9 @@ public:
   // Iterate over all entries.
   std::vector<std::pair<std::string, std::string>> res = {};
   const AVDictionaryEntry *e = nullptr;
+  // NOLINTNEXTLINE
   while ((e = av_dict_get(opt.dict, "", e, AV_DICT_IGNORE_SUFFIX))) {
-    res.push_back(std::make_pair(std::string{ e->key }, std::string{ e->value }));
+    res.emplace_back(std::make_pair(std::string{ e->key }, std::string{ e->value }));
   }
   return res;
 }
@@ -159,9 +165,9 @@ static void LogError(const char *msg, const int errnum = 0)
   std::ostringstream oss;
   oss << "[mux] " << msg;
   if (errnum < 0) {
-    char errbuf[AV_ERROR_MAX_STRING_SIZE];
-    av_strerror(errnum, errbuf, AV_ERROR_MAX_STRING_SIZE);
-    oss << ": " << errbuf << '\n';
+    std::array<char, AV_ERROR_MAX_STRING_SIZE> errbuf = {};
+    av_strerror(errnum, errbuf.data(), AV_ERROR_MAX_STRING_SIZE);
+    oss << ": " << errbuf.data() << '\n';
   } else {
     oss << '\n';
   }
@@ -180,6 +186,7 @@ static void LogInfo(const char *msg)
   if (!(enc_ctx != nullptr && qscale >= 0)) { return false; }
 
   // From ffmpeg source code.
+  // NOLINTNEXTLINE
   enc_ctx->flags |= AV_CODEC_FLAG_QSCALE;
   enc_ctx->global_quality = FF_QP2LAMBDA * qscale;
   return true;
@@ -199,7 +206,7 @@ static void LogInfo(const char *msg)
   const auto exit_func = [&](const bool success) {
     if (!success) {
       if (*ofmt_ctx != nullptr && (*ofmt_ctx)->pb != nullptr
-          && !((*ofmt_ctx)->oformat->flags & AVFMT_NOFILE)) {
+          && !((*ofmt_ctx)->oformat->flags & AVFMT_NOFILE)) {// NOLINT
         avio_closep(&(*ofmt_ctx)->pb);
       }
 
@@ -279,8 +286,8 @@ static void LogInfo(const char *msg)
 #endif
 
   // Some formats want stream headers (video, audio) to be separate.
-  if ((*ofmt_ctx)->oformat->flags & AVFMT_GLOBALHEADER) {
-    (*enc_ctx)->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+  if ((*ofmt_ctx)->oformat->flags & AVFMT_GLOBALHEADER) {// NOLINT
+    (*enc_ctx)->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;// NOLINT
   }
 
   // Codec-specific settings on encoding context.
@@ -330,7 +337,7 @@ static void LogInfo(const char *msg)
   }
 
   // Open the output file, if needed.
-  if (!((*ofmt_ctx)->oformat->flags & AVFMT_NOFILE)) {
+  if (!((*ofmt_ctx)->oformat->flags & AVFMT_NOFILE)) {// NOLINT
     if (const int ret = avio_open(&(*ofmt_ctx)->pb, filename, AVIO_FLAG_WRITE); ret < 0) {
       std::ostringstream oss;
       oss << "Could not open output file '" << filename << "'";
@@ -362,7 +369,7 @@ static void LogInfo(const char *msg)
   AVFilterContext *src_ctx,
   AVFilterContext *sink_ctx) -> bool
 {
-  assert(graph != nullptr);
+  assert(graph != nullptr);// NOLINT
 
   const unsigned int nb_filters = graph->nb_filters;
   AVFilterInOut *inputs = nullptr;
@@ -401,7 +408,7 @@ static void LogInfo(const char *msg)
 
   // Reorder the filters to ensure that inputs of the custom filters are merged first.
   for (unsigned int i = 0; i < graph->nb_filters - nb_filters; ++i) {
-    FFSWAP(AVFilterContext *, graph->filters[i], graph->filters[i + nb_filters]);
+    FFSWAP(AVFilterContext *, graph->filters[i], graph->filters[i + nb_filters]);// NOLINT
   }
 
   if (const int ret = avfilter_graph_config(graph, /*log_ctx=*/nullptr); ret < 0) {
@@ -422,9 +429,10 @@ static void LogInfo(const char *msg)
   graph->scale_sws_opts = av_strdup(sws_flags);
 
   // clang-format off
-  char buffersrc_args[512];
-  std::snprintf(buffersrc_args,
-                sizeof(buffersrc_args),
+  std::array<char, 512> buffersrc_args = {};
+  // NOLINTNEXTLINE
+  std::snprintf(buffersrc_args.data(),
+                512,
                 //"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:frame_rate=%d/%d",
                 "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
                 enc_ctx->width, enc_ctx->height, AV_PIX_FMT_GBRPF32,
@@ -437,7 +445,7 @@ static void LogInfo(const char *msg)
   if (const int ret = avfilter_graph_create_filter(&filt_src,
         avfilter_get_by_name(/*name=*/"buffer"),
         /*name=*/"in",
-        buffersrc_args,
+        buffersrc_args.data(),
         /*opaque=*/nullptr,
         graph);
       ret < 0) {
@@ -460,7 +468,7 @@ static void LogInfo(const char *msg)
         "pix_fmts",
         reinterpret_cast<const uint8_t *>(&enc_ctx->pix_fmt),
         sizeof(enc_ctx->pix_fmt),
-        AV_OPT_SEARCH_CHILDREN);
+        AV_OPT_SEARCH_CHILDREN);// NOLINT
       ret < 0) {
     LogError("Could not set buffer sink pixel format", ret);
     return false;
@@ -489,11 +497,12 @@ static void LogInfo(const char *msg)
   int ret = 0;
   while (ret >= 0) {
     ret = avcodec_receive_packet(enc_ctx, enc_pkt);
+    // NOLINTNEXTLINE
     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) { return true; }
 
     // Prepare packet for muxing.
     enc_pkt->stream_index = 0;
-    av_packet_rescale_ts(enc_pkt, enc_ctx->time_base, ofmt_ctx->streams[0]->time_base);
+    av_packet_rescale_ts(enc_pkt, enc_ctx->time_base, ofmt_ctx->streams[0]->time_base);// NOLINT
 
     // Mux encoded frame.
     ret = av_interleaved_write_frame(ofmt_ctx, enc_pkt);
@@ -532,6 +541,7 @@ static void LogInfo(const char *msg)
       // If flushed and no more frames for output - returns AVERROR_EOF
       //
       // Rewrite return code to 0 to show it as normal procedure completion.
+      // NOLINTNEXTLINE
       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) { ret = 0; }
       break;
     }
@@ -623,22 +633,22 @@ WriteFrame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st, AVFrame *f
 static void mux_log_callback(void *ptr, int level, const char *fmt, va_list vl)
 {
   static constexpr int kLineSize = 1024;
-  char line[kLineSize];
+  std::array<char, kLineSize> line = {};
   static int print_prefix = 1;
 
   std::scoped_lock lock{ mutex };
 
-  const int ret = av_log_format_line2(ptr, level, fmt, vl, line, kLineSize, &print_prefix);
+  const int ret = av_log_format_line2(ptr, level, fmt, vl, line.data(), kLineSize, &print_prefix);
   if (ret < 0) {
     MuxLog("[mux] Log error\n");
     return;
   } else if (!(ret < kLineSize)) {
     MuxLog("[mux] Truncated log message\n");
   }
-  MuxLog(line);
+  MuxLog(line.data());
 }
 
-namespace IlpGafferMovieWriter {
+namespace ilp {
 
 void MuxSetLogLevel(const MuxLogLevel level)
 {
@@ -693,7 +703,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
 
   // Allocate the implementation specific data.
   // MUST be manually free'd at some later point.
-  mux_ctx->impl = new IlpGafferMovieWriter::MuxImpl;
+  mux_ctx->impl = new MuxImpl;// NOLINT
   MuxImpl *impl = mux_ctx->impl;
 
   if (!OpenOutputFile(&impl->ofmt_ctx,
@@ -753,8 +763,8 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            assert(mux_ctx->h264.profile != nullptr);
-            assert(mux_ctx->h264.preset != nullptr);
+            assert(mux_ctx->h264.profile != nullptr);// NOLINT
+            assert(mux_ctx->h264.preset != nullptr);// NOLINT
             av_dict_set(enc_opt, "profile", mux_ctx->h264.profile, /*flags=*/0);
             av_dict_set(enc_opt, "preset", mux_ctx->h264.preset, /*flags=*/0);
             av_dict_set(enc_opt, "x264-params", mux_ctx->h264.x264_params, /*flags=*/0);
@@ -784,19 +794,19 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             }
 
             // clang-format off
-              assert(mux_ctx->pro_res.profile != nullptr);
-              int64_t p = -1;
-              if      (std::strcmp(mux_ctx->pro_res.profile, "proxy") == 0)    { p = 0; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "lt") == 0)       { p = 1; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "standard") == 0) { p = 2; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "hq") == 0)       { p = 3; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
-              else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
-              else {
-                LogError("Could not configure ProRes profile");
-                return false;   
-              }
-              av_dict_set_int(enc_opt, "profile", p, /*flags=*/0);
+            assert(mux_ctx->pro_res.profile != nullptr); // NOLINT
+            int64_t p = -1;
+            if      (std::strcmp(mux_ctx->pro_res.profile, "proxy") == 0)    { p = 0; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "lt") == 0)       { p = 1; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "standard") == 0) { p = 2; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "hq") == 0)       { p = 3; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
+            else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
+            else {
+              LogError("Could not configure ProRes profile");
+              return false;   
+            }
+            av_dict_set_int(enc_opt, "profile", p, /*flags=*/0);
             // clang-format on
 
             av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.vendor, /*flags=*/0);
@@ -864,9 +874,9 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
   }
 
   const size_t byte_count = static_cast<size_t>(mux_frame.width * mux_frame.height) * sizeof(float);
-  std::memcpy(/*dst=*/dec_frame->data[0], /*src=*/mux_frame.g, byte_count);
-  std::memcpy(/*dst=*/dec_frame->data[1], /*src=*/mux_frame.b, byte_count);
-  std::memcpy(/*dst=*/dec_frame->data[2], /*src=*/mux_frame.r, byte_count);
+  std::memcpy(/*__dest=*/dec_frame->data[0], /*__src=*/mux_frame.g, byte_count);
+  std::memcpy(/*__dest=*/dec_frame->data[1], /*__src=*/mux_frame.b, byte_count);
+  std::memcpy(/*__dest=*/dec_frame->data[2], /*__src=*/mux_frame.r, byte_count);
   dec_frame->pts = static_cast<int64_t>(mux_frame.frame_nb);
 
   return FilterEncodeWriteFrame(impl->ofmt_ctx,
@@ -900,7 +910,7 @@ auto MuxFinish(const MuxContext &mux_ctx) -> bool
   }
 
   // Flush encoder.
-  if (impl->enc_ctx->codec->capabilities & AV_CODEC_CAP_DELAY) {
+  if (impl->enc_ctx->codec->capabilities & AV_CODEC_CAP_DELAY) {// NOLINT
     LogInfo("Flushing stream encoder");
     if (!EncodeWriteFrame(impl->ofmt_ctx, impl->enc_ctx, impl->enc_pkt, /*enc_frame=*/nullptr)) {
       LogError("Could not flush stream encoder");
@@ -914,7 +924,7 @@ auto MuxFinish(const MuxContext &mux_ctx) -> bool
   }
 
   // Close the output file, if any.
-  if (!(impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+  if (!(impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
     if (const int ret = avio_closep(&impl->ofmt_ctx->pb); ret < 0) {
       LogError("Could not close file", ret);
       return false;
@@ -945,11 +955,11 @@ void MuxFree(MuxContext *const mux_ctx)
   // TODO: close file, if not already closed!!!!!!!
 
   // Free the memory used to store the implementation handles.
-  delete impl;
+  delete impl;// NOLINT
   mux_ctx->impl = nullptr;
 }
 
-}// namespace IlpGafferMovieWriter
+}// namespace ilp
 
 #if 0
   // Create a new scaling context to match the tmp frame and out frame

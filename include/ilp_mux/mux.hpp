@@ -1,8 +1,10 @@
 #pragma once
 
-#include <functional> // std::function
+#include <functional>// std::function
 
-namespace IlpGafferMovieWriter {
+#include <ilp_mux/ilp_mux_export.hpp>
+
+namespace ilp {
 
 enum class MuxLogLevel : int {
   // Print no output.
@@ -35,7 +37,10 @@ enum class MuxLogLevel : int {
   kTrace,
 };
 
+ILP_MUX_EXPORT
 void MuxSetLogLevel(MuxLogLevel level);
+
+ILP_MUX_EXPORT
 void MuxSetLogCallback(const std::function<void(const char *)> &cb);
 
 struct MuxImpl;
@@ -80,7 +85,8 @@ struct MuxImpl;
 //   return true;
 // }
 //
-struct MuxContext {
+struct MuxContext
+{
   // The filename cannot be null.
   // If format_name is null the output format is guessed according to the file extension.
   const char *filename = nullptr;
@@ -94,19 +100,21 @@ struct MuxContext {
   const char *codec_name = nullptr;
 
   // Supported color ranges:
-  //   "unknown" 
+  //   "unknown"
   //   "tv" (limited range)
   //   "pc" (full range)
-  const char* color_range = "pc";
+  const char *color_range = "pc";
 
-  const char* color_primaries = "bt709";
-  const char* color_trc = "iec61966-2-1";
-  const char* colorspace = "bt709";
+  const char *color_primaries = "bt709";
+  const char *color_trc = "iec61966-2-1";
+  const char *colorspace = "bt709";
 
   const char *sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp";
-  const char *filtergraph = "scale=in_range=full:in_color_matrix=bt709:out_range=tv:out_color_matrix=bt709";
+  const char *filtergraph =
+    "scale=in_range=full:in_color_matrix=bt709:out_range=tv:out_color_matrix=bt709";
 
-  struct {
+  struct
+  {
     // The basic difference is the bitrates... TODO: expand!
     // 0 - proxy
     // 1 - lt
@@ -131,7 +139,8 @@ struct MuxContext {
   } pro_res = {};
 
   // Docs: https://trac.ffmpeg.org/wiki/Encode/H.264
-  struct {
+  struct
+  {
     // Typically not used according to docs, leave as null to use default.
     // Supported profiles:
     //   "baseline"
@@ -189,7 +198,7 @@ struct MuxContext {
     // See: https://slhck.info/video/2017/02/24/crf-guide.html
     int crf = 23;
 
-    const char* x264_params = "keyint=15:no-deblock=1";
+    const char *x264_params = "keyint=15:no-deblock=1";
 
     int qp = -1;
 #if 0
@@ -234,7 +243,8 @@ struct MuxContext {
 // The 'r' pointer is assumed to point to a buffer of (width * height) floats, and
 // similar for 'g' and 'b'.
 // NOTE: Set the width and height using the corresponding values on the mux context.
-struct MuxFrame {
+struct MuxFrame
+{
   int width = -1;
   int height = -1;
   float frame_nb = -1.F;
@@ -251,7 +261,7 @@ struct MuxFrame {
 //
 // If false is returned, the internal resources could not be allocated. The mux context will be
 // unusable. There is no need to call MuxFree{} in this case.
-[[nodiscard]] auto MuxInit(MuxContext *mux_ctx) -> bool;
+[[nodiscard]] ILP_MUX_EXPORT auto MuxInit(MuxContext *mux_ctx) -> bool;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.
@@ -261,13 +271,14 @@ struct MuxFrame {
 //
 // Note that the frame's width/height must match the corresponding values on the MuxContext since
 // we currently don't support pixel scaling.
-[[nodiscard]] auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &frame) -> bool;
+[[nodiscard]] ILP_MUX_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &frame)
+  -> bool;
 
 // Finalize the file by flushing streams and possibly performing other operations.
 //
 // Returns true if successful, otherwise false.
 // Note that the MuxContext must be manually free'd using MuxFreeImpl{} regardless of success.
-[[nodiscard]] auto MuxFinish(const MuxContext &mux_ctx) -> bool;
+[[nodiscard]] ILP_MUX_EXPORT auto MuxFinish(const MuxContext &mux_ctx) -> bool;
 
 // Free the resources allocated by the implementation in MuxInit{}. The implementation pointer will
 // be set to null.
@@ -276,6 +287,7 @@ struct MuxFrame {
 //
 // Note: Only MuxContext instances that have been passed to a successful MuxInit{} call need to free
 // their implementations.
+ILP_MUX_EXPORT
 void MuxFree(MuxContext *mux_ctx);
 
-} // namespace IlpGafferMovieWriter
+}// namespace ilp

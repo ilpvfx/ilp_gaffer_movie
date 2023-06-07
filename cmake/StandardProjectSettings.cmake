@@ -20,10 +20,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # NOTE(tohi): This seems to generate broken output when running inside a container.
 #
 # Enhance error reporting and compiler messages
-if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
-  # add_compile_options(-fcolor-diagnostics)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # add_compile_options(-fdiagnostics-color=always)
-else()
-  message(STATUS "No colored compiler diagnostic set for '${CMAKE_CXX_COMPILER_ID}' compiler.")
-endif()
+# if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+#   add_compile_options(-fcolor-diagnostics)
+# elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+#   add_compile_options(-fdiagnostics-color=always)
+# else()
+#   message(STATUS "No colored compiler diagnostic set for '${CMAKE_CXX_COMPILER_ID}' compiler.")
+# endif()
