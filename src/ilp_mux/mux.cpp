@@ -30,7 +30,7 @@ extern "C" {
 static std::mutex mutex;
 static std::function<void(const char *)> MuxLog = [](const char * /*s*/) {};
 
-namespace IlpGafferMovieWriter {
+namespace ilp {
 
 struct MuxImpl
 {
@@ -58,7 +58,7 @@ struct MuxImpl
   // const AVCodec *video_codec = nullptr;
 };
 
-}// namespace IlpGafferMovieWriter
+}// namespace ilp
 
 namespace {
 
@@ -369,7 +369,7 @@ static void LogInfo(const char *msg)
   AVFilterContext *src_ctx,
   AVFilterContext *sink_ctx) -> bool
 {
-  assert(graph != nullptr); // NOLINT
+  assert(graph != nullptr);// NOLINT
 
   const unsigned int nb_filters = graph->nb_filters;
   AVFilterInOut *inputs = nullptr;
@@ -648,7 +648,7 @@ static void mux_log_callback(void *ptr, int level, const char *fmt, va_list vl)
   MuxLog(line.data());
 }
 
-namespace IlpGafferMovieWriter {
+namespace ilp {
 
 void MuxSetLogLevel(const MuxLogLevel level)
 {
@@ -703,7 +703,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
 
   // Allocate the implementation specific data.
   // MUST be manually free'd at some later point.
-  mux_ctx->impl = new IlpGafferMovieWriter::MuxImpl;// NOLINT
+  mux_ctx->impl = new MuxImpl;// NOLINT
   MuxImpl *impl = mux_ctx->impl;
 
   if (!OpenOutputFile(&impl->ofmt_ctx,
@@ -763,8 +763,8 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            assert(mux_ctx->h264.profile != nullptr); // NOLINT
-            assert(mux_ctx->h264.preset != nullptr); // NOLINT
+            assert(mux_ctx->h264.profile != nullptr);// NOLINT
+            assert(mux_ctx->h264.preset != nullptr);// NOLINT
             av_dict_set(enc_opt, "profile", mux_ctx->h264.profile, /*flags=*/0);
             av_dict_set(enc_opt, "preset", mux_ctx->h264.preset, /*flags=*/0);
             av_dict_set(enc_opt, "x264-params", mux_ctx->h264.x264_params, /*flags=*/0);
@@ -959,7 +959,7 @@ void MuxFree(MuxContext *const mux_ctx)
   mux_ctx->impl = nullptr;
 }
 
-}// namespace IlpGafferMovieWriter
+}// namespace ilp
 
 #if 0
   // Create a new scaling context to match the tmp frame and out frame

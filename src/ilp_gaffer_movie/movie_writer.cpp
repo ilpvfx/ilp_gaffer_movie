@@ -9,7 +9,7 @@
 
 // #include <GafferImage/ImagePlug.h>
 
-// #include "ilp_gaffer_movie_writer/mux.h"
+#include <ilp_mux/mux.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieWriter);
 
@@ -25,7 +25,6 @@ struct ProfilePixelFormat
 };
 }// namespace
 
-#if 0
 // NOTE: p is a string indicating which profile to use for the provided codec. Since codecs
 //       use different systems for profiles the exact contents of this string is codec-dependent.
 [[nodiscard]] static auto GetProfilePixelFormat(const std::string &codec, const std::string &p)
@@ -55,7 +54,6 @@ struct ProfilePixelFormat
   // Error!
   return {};
 }
-#endif
 
 namespace IlpGafferMovie {
 
@@ -259,17 +257,16 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
   std::string tune;
   std::string x264_params;
 
-#if 0
   // Setup muxer.
   //
   // NOTE(tohi): We cannot set the width and height until we have "seen" the first image.
-  MuxSetLogLevel(MuxLogLevel::kInfo);
-  MuxSetLogCallback([](const char *s) {
+  ilp::MuxSetLogLevel(ilp::MuxLogLevel::kInfo);
+  ilp::MuxSetLogCallback([](const char *s) {
     IECore::msg(IECore::Msg::Info, "MovieWriterSequential::mux", std::string{ s });
   });
 
   bool mux_init = false;
-  MuxContext mux_ctx = {};
+  ilp::MuxContext mux_ctx = {};
   mux_ctx.filename = filename.c_str();
   mux_ctx.fps = static_cast<double>(context->getFramesPerSecond());
   mux_ctx.color_range = color_range.c_str();
@@ -335,7 +332,7 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     }
 
     // Pass a frame to the muxer.
-    MuxFrame mux_frame = {};
+    ilp::MuxFrame mux_frame = {};
     mux_frame.width = mux_ctx.width;
     mux_frame.height = mux_ctx.height;
     mux_frame.frame_nb = frame;
@@ -353,7 +350,6 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     throw IECore::Exception("Mux finish failed");
   }
   MuxFree(&mux_ctx);
-#endif
 
 #if 0
     ConstCompoundDataPtr sets;
