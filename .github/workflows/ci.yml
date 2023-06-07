@@ -89,7 +89,7 @@ jobs:
       #       core.setFailed('There is a mismatch between configured llvm compiler and clang-tidy version chosen')
 
       - name: Checkout repository
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
 
       # - name: Setup Cache
       #   uses: ./.github/actions/setup_cache
