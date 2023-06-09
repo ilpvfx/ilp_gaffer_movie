@@ -37,7 +37,9 @@ target_compile_definitions(ilp_mux
 target_link_system_libraries(ilp_mux 
   PUBLIC 
     PkgConfig::LIBAV)
+
 generate_export_header(ilp_mux
   EXPORT_FILE_NAME 
     ${PROJECT_BINARY_DIR}/include/ilp_mux/ilp_mux_export.hpp)
+    
 install(TARGETS ilp_mux DESTINATION lib)

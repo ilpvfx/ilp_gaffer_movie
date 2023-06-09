@@ -15,13 +15,11 @@
 // export IECORE_LOG_LEVEL=Info
 // export GAFFER_EXTENSION_PATHS=~/dev/git/gaffer_extension_example/install:$GAFFER_EXTENSION_PATHS
 
-#if 0
 namespace Gaffer {
-//IE_CORE_FORWARDDECLARE(IntPlug)
+// IE_CORE_FORWARDDECLARE(IntPlug)
 IE_CORE_FORWARDDECLARE(StringPlug)
-IE_CORE_FORWARDDECLARE(ValuePlug)
-} // namespace Gaffer
-#endif
+// IE_CORE_FORWARDDECLARE(ValuePlug)
+}// namespace Gaffer
 
 namespace GafferImage {
 // IE_CORE_FORWARDDECLARE(ColorSpace)
@@ -33,7 +31,7 @@ namespace IlpGafferMovie {
 class ILPGAFFERMOVIE_EXPORT MovieWriter : public GafferDispatch::TaskNode
 {
 public:
-  MovieWriter(const std::string &name = defaultName<MovieWriter>());
+  explicit MovieWriter(const std::string &name = defaultName<MovieWriter>());
   ~MovieWriter() override = default;
 
   GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::MovieWriter,

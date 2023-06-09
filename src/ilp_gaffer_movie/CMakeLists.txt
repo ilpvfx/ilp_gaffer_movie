@@ -41,6 +41,8 @@ target_link_system_libraries(IlpGafferMovie
     Gaffer::Gaffer 
     Gaffer::GafferScene 
     Gaffer::IECore)
+
 generate_export_header(IlpGafferMovie 
   EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/ilp_gaffer_movie/ilp_gaffer_movie_export.hpp)
+  
 install(TARGETS IlpGafferMovie DESTINATION lib)
