@@ -9,10 +9,12 @@
 // HACK(tohi): Disable TBB deprecation warning.
 #define __TBB_show_deprecation_message_task_scheduler_init_H
 
+#include <ilp_gaffer_movie/av_reader.hpp>
 #include <ilp_gaffer_movie/movie_reader.hpp>
 
-#include "GafferImage/FormatPlug.h"
 #include <Gaffer/StringPlug.h>
+
+#include <GafferImage/FormatPlug.h>
 #include <GafferImage/ImageAlgo.h>
 #include <GafferImage/ImagePlug.h>
 
@@ -20,29 +22,158 @@
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieReader);
 
-// using namespace Gaffer;
-//  using namespace GafferImage;
-
 namespace IlpGafferMovie {
 
 size_t MovieReader::FirstPlugIndex = 0U;
 
 MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
 {
+  using Plug = Gaffer::Plug;
+
+  constexpr auto kPlugDefault = static_cast<unsigned int>(Plug::Default);
+  constexpr auto kPlugSerializable = static_cast<unsigned int>(Plug::Serialisable);
+
   storeIndexOfNextChild(FirstPlugIndex);
   // addChild(new ImagePlug("in", Plug::In));
-  addChild(new Gaffer::StringPlug("fileName"));
+  addChild(new Gaffer::StringPlug("fileName", Plug::In, "", /*flags=*/Plug::Default));
+  addChild(new Gaffer::IntPlug("refreshCount"));
+  addChild(new Gaffer::IntPlug("missingFrameMode", Plug::In
+#if 0
+    , Error, /* min */ Error, /* max */ Hold
+#endif
+    ));
 
-  // constexpr auto plug_default = static_cast<unsigned int>(Plug::Default);
-  // constexpr auto plug_serializable = static_cast<unsigned int>(Plug::Serialisable);
   // addChild(new ImagePlug("out", Plug::Out, plug_default & ~plug_serializable));
 
+  addChild(new Gaffer::IntPlug("channelInterpretation", Plug::In
+#if 0
+    ,
+    (int)ChannelInterpretation::Default,
+    /* min */ (int)ChannelInterpretation::Legacy,
+    /* max */ (int)ChannelInterpretation::Specification
+#endif
+    ));
+
+  addChild(new Gaffer::AtomicCompoundDataPlug("__intermediateMetadata",
+    Plug::In,
+    new IECore::CompoundData,
+    kPlugDefault & ~kPlugSerializable));
+  // addChild(new Gaffer::StringPlug(
+  //   "__intermediateColorSpace", Plug::Out, "", Plug::Default & ~Plug::Serialisable));
+  addChild(
+    new GafferImage::ImagePlug("__intermediateImage", Plug::In, kPlugDefault & ~kPlugSerializable));
+
+  // We don't really do much work ourselves - we just
+  // defer to internal nodes to do the hard work.
+
+  AvReaderPtr avReader = new AvReader("__avReader");
+  addChild(avReader);
+  avReader->fileNamePlug()->setInput(fileNamePlug());
+  avReader->refreshCountPlug()->setInput(refreshCountPlug());
+  avReader->missingFrameModePlug()->setInput(missingFrameModePlug());
+  avReader->channelInterpretationPlug()->setInput(channelInterpretationPlug());
+  _intermediateMetadataPlug()->setInput(avReader->outPlug()->metadataPlug());
+
+  _intermediateImagePlug()->setInput(avReader->outPlug());
+
   // outPlug()->setInput(inPlug());
+}
+
+Gaffer::StringPlug *MovieReader::fileNamePlug()
+{
+  constexpr size_t kPlugIndex = 0;
+  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+const Gaffer::StringPlug *MovieReader::fileNamePlug() const
+{
+  constexpr size_t kPlugIndex = 0;
+  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+Gaffer::IntPlug *MovieReader::refreshCountPlug()
+{
+  constexpr size_t kPlugIndex = 1;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+const Gaffer::IntPlug *MovieReader::refreshCountPlug() const
+{
+  constexpr size_t kPlugIndex = 1;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+Gaffer::IntPlug *MovieReader::missingFrameModePlug()
+{
+  constexpr size_t kPlugIndex = 2;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+const Gaffer::IntPlug *MovieReader::missingFrameModePlug() const
+{
+  constexpr size_t kPlugIndex = 2;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+Gaffer::IntPlug *MovieReader::channelInterpretationPlug()
+{
+  constexpr size_t kPlugIndex = 3;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+const Gaffer::IntPlug *MovieReader::channelInterpretationPlug() const
+{
+  constexpr size_t kPlugIndex = 3;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+Gaffer::AtomicCompoundDataPlug *MovieReader::_intermediateMetadataPlug()
+{
+  constexpr size_t kPlugIndex = 4;
+  return getChild<Gaffer::AtomicCompoundDataPlug>(FirstPlugIndex + kPlugIndex);
+}
+const Gaffer::AtomicCompoundDataPlug *MovieReader::_intermediateMetadataPlug() const
+{
+  constexpr size_t kPlugIndex = 4;
+  return getChild<Gaffer::AtomicCompoundDataPlug>(FirstPlugIndex + kPlugIndex);
+}
+
+GafferImage::ImagePlug *MovieReader::_intermediateImagePlug()
+{
+  constexpr size_t kPlugIndex = 5;
+  return getChild<GafferImage::ImagePlug>(FirstPlugIndex + kPlugIndex);
+}
+
+const GafferImage::ImagePlug *MovieReader::_intermediateImagePlug() const
+{
+  constexpr size_t kPlugIndex = 5;
+  return getChild<GafferImage::ImagePlug>(FirstPlugIndex + kPlugIndex);
+}
+
+AvReader *MovieReader::_avReader()
+{
+  constexpr size_t kPlugIndex = 6;
+  return getChild<AvReader>(FirstPlugIndex + kPlugIndex);
+}
+
+const AvReader *MovieReader::_avReader() const
+{
+  constexpr size_t kPlugIndex = 6;
+  return getChild<AvReader>(FirstPlugIndex + kPlugIndex);
 }
 
 void MovieReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const
 {
   ImageNode::affects(input, outputs);
+
+  if (input == _intermediateMetadataPlug() /*|| input == colorSpacePlug()*/) {
+    //outputs.push_back(intermediateColorSpacePlug());
+  } else if (input->parent<GafferImage::ImagePlug>() == _intermediateImagePlug()) {
+    outputs.push_back(outPlug()->getChild<Gaffer::ValuePlug>(input->getName()));
+  } /*else if (input == startFramePlug() || input == startModePlug() || input == endFramePlug()
+             || input == endModePlug()) {
+    for (ValuePlug::Iterator it(outPlug()); !it.done(); ++it) { outputs.push_back(it->get()); }
+  }*/
 }
 
 void MovieReader::hash(const Gaffer::ValuePlug *output,
@@ -51,59 +182,17 @@ void MovieReader::hash(const Gaffer::ValuePlug *output,
 {
   ImageNode::hash(output, context, h);
 
-  // if (output == intermediateColorSpacePlug()) {
-  //   intermediateMetadataPlug()->hash(h);
+  // if (output == _intermediateColorSpacePlug()) {
+  //   _intermediateMetadataPlug()->hash(h);
   //   colorSpacePlug()->hash(h);
   //   fileNamePlug()->hash(h);
-  //   h.append(OpenColorIOAlgo::currentConfigHash());
   // }
 }
 
-#if 0
 void MovieReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const
 {
-  try {
-    IECore::msg(IECore::Msg::Info, "MovieReader", "compute");
-    const auto dwin = outPlug()->dataWindow();
-    IECore::msg(IECore::Msg::Info,
-      "MovieReader - data window: ",
-      boost::format("{%1, %2}, {%3, %4}") % dwin.min.x % dwin.min.y % dwin.max.x % dwin.max.y);
-
-
-    auto img_ptr = GafferImage::ImageAlgo::image(outPlug(), &ImagePlug::defaultViewName);
-
-    IECore::msg(IECore::Msg::Info,
-      "MovieReader - img_ptr: ",
-      (img_ptr.get() != nullptr ? std::string{ "yes" } : std::string{ "no" }));
-
-    if (img_ptr == nullptr) { return; }
-
-    auto *r = img_ptr->getChannel<float>("R");
-    auto *g = img_ptr->getChannel<float>("G");
-    auto *b = img_ptr->getChannel<float>("B");
-
-    IECore::msg(IECore::Msg::Info,
-      "MovieReader - r: ",
-      (r != nullptr ? std::string{ "yes" } : std::string{ "no" }));
-    IECore::msg(IECore::Msg::Info,
-      "MovieReader - g: ",
-      (g != nullptr ? std::string{ "yes" } : std::string{ "no" }));
-    IECore::msg(IECore::Msg::Info,
-      "MovieReader - b: ",
-      (b != nullptr ? std::string{ "yes" } : std::string{ "no" }));
-
-    // outPlug()->channelData()->writable()
-    static const bool no = false;
-    if (no) {
-
-    } else {
-      ImageNode::compute(output, context);
-    }
-  } catch (const IECore::Exception &e) {
-    IECore::msg(IECore::Msg::Info, "MovieReader - Exception: ", e.what());
-  }
+  ImageNode::compute(output, context);
 }
-#endif
 
 void MovieReader::hashViewNames(const GafferImage::ImagePlug *parent,
   const Gaffer::Context *context,
@@ -280,18 +369,6 @@ IECore::ConstFloatVectorDataPtr MovieReader::computeChannelData(const std::strin
 {
   IECore::msg(IECore::Msg::Info, "MovieReader", "computeChannelData");
   return parent->channelDataPlug()->defaultValue();
-}
-
-Gaffer::StringPlug *MovieReader::fileNamePlug()
-{
-  constexpr size_t kPlugIndex = 0;
-  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
-}
-
-const Gaffer::StringPlug *MovieReader::fileNamePlug() const
-{
-  constexpr size_t kPlugIndex = 0;
-  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 }// namespace IlpGafferMovie

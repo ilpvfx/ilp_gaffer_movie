@@ -1,16 +1,10 @@
 #pragma once
 
-#include <string>
-
+#include <Gaffer/NumericPlug.h>
 #include <GafferImage/ImageNode.h>
-#include <Gaffer/CompoundNumericPlug.h>
 
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
-
-// ENV
-// export IECORE_LOG_LEVEL=Info
-// export GAFFER_EXTENSION_PATHS=~/dev/git/gaffer_extension_example/install:$GAFFER_EXTENSION_PATHS
 
 namespace Gaffer {
 IE_CORE_FORWARDDECLARE(StringPlug)
@@ -18,17 +12,21 @@ IE_CORE_FORWARDDECLARE(StringPlug)
 
 namespace IlpGafferMovie {
 
-IE_CORE_FORWARDDECLARE(AvReader)
-
-class ILPGAFFERMOVIE_EXPORT MovieReader : public GafferImage::ImageNode
+class ILPGAFFERMOVIE_EXPORT AvReader : public GafferImage::ImageNode
 {
 public:
-  explicit MovieReader(const std::string &name = defaultName<MovieReader>());
-  ~MovieReader() override = default;
+  explicit AvReader(const std::string &name = defaultName<AvReader>());
+  ~AvReader() override = default;
 
-  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::MovieReader,
-    TypeId::kMovieReaderTypeId,
-    GafferImage::ImageNode)
+  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::AvReader,
+    TypeId::kAvReaderTypeId,
+    GafferImage::ImageNode);
+
+  enum MissingFrameMode {
+    Error = 0,
+    Black,
+    Hold,
+  };
 
   Gaffer::StringPlug *fileNamePlug();
   const Gaffer::StringPlug *fileNamePlug() const;
@@ -40,12 +38,13 @@ public:
   Gaffer::IntPlug *missingFrameModePlug();
   const Gaffer::IntPlug *missingFrameModePlug() const;
 
+  Gaffer::IntVectorDataPlug *availableFramesPlug();
+  const Gaffer::IntVectorDataPlug *availableFramesPlug() const;
+
   Gaffer::IntPlug *channelInterpretationPlug();
   const Gaffer::IntPlug *channelInterpretationPlug() const;
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
-
-  // static size_t supportedExtensions( std::vector<std::string> &extensions );
 
 protected:
   void hash(const Gaffer::ValuePlug *output,
@@ -106,30 +105,12 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
-  // We use internal nodes to do all the hard work,
-  // but we need to store intermediate results between
-  // those nodes in order to affect the outcome.
+  void plugSet(Gaffer::Plug *plug);
 
-  AvReader *_avReader();
-  const AvReader *_avReader() const;
-
-  Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug();
-  const Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug() const;
-
-  // Gaffer::StringPlug *intermediateColorSpacePlug();
-  // const Gaffer::StringPlug *intermediateColorSpacePlug() const;
-
-  // ColorSpace *colorSpace();
-  // const ColorSpace *colorSpace() const;
-
-  GafferImage::ImagePlug *_intermediateImagePlug();
-  const GafferImage::ImagePlug *_intermediateImagePlug() const;
-
-  // static DefaultColorSpaceFunction &defaultColorSpaceFunction();
+  Gaffer::ObjectVectorPlug *_tileBatchPlug();
+  const Gaffer::ObjectVectorPlug *_tileBatchPlug() const;
 
   static std::size_t FirstPlugIndex;
 };
-
-IE_CORE_DECLAREPTR(MovieReader)
 
 }// namespace IlpGafferMovie
