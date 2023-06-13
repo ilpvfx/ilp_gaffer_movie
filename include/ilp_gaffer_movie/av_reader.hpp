@@ -22,10 +22,10 @@ public:
     TypeId::kAvReaderTypeId,
     GafferImage::ImageNode);
 
-  enum MissingFrameMode {
-    Error = 0,
-    Black,
-    Hold,
+  enum class MissingFrameMode : int {
+    kError = 0,
+    kBlack,
+    kHold,
   };
 
   Gaffer::StringPlug *fileNamePlug();
@@ -41,8 +41,10 @@ public:
   Gaffer::IntVectorDataPlug *availableFramesPlug();
   const Gaffer::IntVectorDataPlug *availableFramesPlug() const;
 
+#if 0
   Gaffer::IntPlug *channelInterpretationPlug();
   const Gaffer::IntPlug *channelInterpretationPlug() const;
+#endif
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
 
@@ -52,6 +54,8 @@ protected:
     IECore::MurmurHash &h) const override;
 
   void compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const override;
+  // Gaffer::ValuePlug::CachePolicy computeCachePolicy( const Gaffer::ValuePlug *output ) const
+  // override;
 
   void hashViewNames(const GafferImage::ImagePlug *parent,
     const Gaffer::Context *context,
@@ -105,12 +109,14 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
-  void plugSet(Gaffer::Plug *plug);
-
   Gaffer::ObjectVectorPlug *_tileBatchPlug();
   const Gaffer::ObjectVectorPlug *_tileBatchPlug() const;
 
+  void _plugSet(Gaffer::Plug *plug);
+
   static std::size_t FirstPlugIndex;
 };
+
+IE_CORE_DECLAREPTR(AvReader)
 
 }// namespace IlpGafferMovie

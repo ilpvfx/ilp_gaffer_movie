@@ -2,8 +2,8 @@
 
 #include <string>
 
-#include <GafferImage/ImageNode.h>
 #include <Gaffer/CompoundNumericPlug.h>
+#include <GafferImage/ImageNode.h>
 
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
@@ -30,6 +30,15 @@ public:
     TypeId::kMovieReaderTypeId,
     GafferImage::ImageNode)
 
+  // The FrameMaskMode controls how to handle images
+  // outside of the values provided by the start
+  // and end frame masks.
+  enum class FrameMaskMode : int {
+    kNone = 0,
+    kBlackOutside,
+    kClampToFrame,
+  };
+
   Gaffer::StringPlug *fileNamePlug();
   const Gaffer::StringPlug *fileNamePlug() const;
 
@@ -37,11 +46,17 @@ public:
   Gaffer::IntPlug *refreshCountPlug();
   const Gaffer::IntPlug *refreshCountPlug() const;
 
-  Gaffer::IntPlug *missingFrameModePlug();
-  const Gaffer::IntPlug *missingFrameModePlug() const;
+  Gaffer::IntPlug *startModePlug();
+  const Gaffer::IntPlug *startModePlug() const;
 
-  Gaffer::IntPlug *channelInterpretationPlug();
-  const Gaffer::IntPlug *channelInterpretationPlug() const;
+  Gaffer::IntPlug *startFramePlug();
+  const Gaffer::IntPlug *startFramePlug() const;
+
+  Gaffer::IntPlug *endModePlug();
+  const Gaffer::IntPlug *endModePlug() const;
+
+  Gaffer::IntPlug *endFramePlug();
+  const Gaffer::IntPlug *endFramePlug() const;
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
 
@@ -116,16 +131,8 @@ private:
   Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug();
   const Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug() const;
 
-  // Gaffer::StringPlug *intermediateColorSpacePlug();
-  // const Gaffer::StringPlug *intermediateColorSpacePlug() const;
-
-  // ColorSpace *colorSpace();
-  // const ColorSpace *colorSpace() const;
-
   GafferImage::ImagePlug *_intermediateImagePlug();
   const GafferImage::ImagePlug *_intermediateImagePlug() const;
-
-  // static DefaultColorSpaceFunction &defaultColorSpaceFunction();
 
   static std::size_t FirstPlugIndex;
 };

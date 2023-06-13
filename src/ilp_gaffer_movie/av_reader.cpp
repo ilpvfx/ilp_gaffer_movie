@@ -26,7 +26,6 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode(name)
 {
   using Plug = Gaffer::Plug;
   using IntPlug = Gaffer::IntPlug;
-  using ImageReader = GafferImage::ImageReader;
 
   storeIndexOfNextChild(FirstPlugIndex);
   addChild(new Gaffer::StringPlug("fileName",
@@ -40,94 +39,93 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode(name)
 #endif
   );
   addChild(new IntPlug("refreshCount"));
-  addChild(new IntPlug("missingFrameMode", Plug::In, Error, /*minValue=*/Error, /*maxValue=*/Hold));
-  addChild(new Gaffer::IntVectorDataPlug("availableFrames", Plug::Out, new IECore::IntVectorData));
-  addChild(new IntPlug("channelInterpretation",
+  addChild(new IntPlug("missingFrameMode",
     Plug::In,
-    static_cast<int>(ImageReader::ChannelInterpretation::Default),
-    /*minValue=*/static_cast<int>(ImageReader::ChannelInterpretation::Legacy),
-    /*maxValue=*/static_cast<int>(ImageReader::ChannelInterpretation::Specification)));
+    /*defaultValue=*/static_cast<int>(MissingFrameMode::kError),
+    /*minValue=*/static_cast<int>(MissingFrameMode::kError),
+    /*maxValue=*/static_cast<int>(MissingFrameMode::kHold)));
+  addChild(new Gaffer::IntVectorDataPlug("availableFrames", Plug::Out, new IECore::IntVectorData));
   addChild(new Gaffer::ObjectVectorPlug("__tileBatch", Plug::Out, new IECore::ObjectVector));
 
   // NOLINTNEXTLINE
-  plugSetSignal().connect(boost::bind(&AvReader::plugSet, this, boost::placeholders::_1));
+  plugSetSignal().connect(boost::bind(&AvReader::_plugSet, this, boost::placeholders::_1));
 }
 
 Gaffer::StringPlug *AvReader::fileNamePlug()
 {
-  return getChild<Gaffer::StringPlug>(FirstPlugIndex);
+  constexpr size_t kPlugIndex = 0;
+  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 const Gaffer::StringPlug *AvReader::fileNamePlug() const
 {
-  return getChild<Gaffer::StringPlug>(FirstPlugIndex);
+  constexpr size_t kPlugIndex = 0;
+  return getChild<Gaffer::StringPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 Gaffer::IntPlug *AvReader::refreshCountPlug()
 {
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 1);
+  constexpr size_t kPlugIndex = 1;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 const Gaffer::IntPlug *AvReader::refreshCountPlug() const
 {
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 1);
+  constexpr size_t kPlugIndex = 1;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 Gaffer::IntPlug *AvReader::missingFrameModePlug()
 {
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 2);
+  constexpr size_t kPlugIndex = 2;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 const Gaffer::IntPlug *AvReader::missingFrameModePlug() const
 {
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 2);
+  constexpr size_t kPlugIndex = 2;
+  return getChild<Gaffer::IntPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 Gaffer::IntVectorDataPlug *AvReader::availableFramesPlug()
 {
-  return getChild<Gaffer::IntVectorDataPlug>(FirstPlugIndex + 3);
+  constexpr size_t kPlugIndex = 3;
+  return getChild<Gaffer::IntVectorDataPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 const Gaffer::IntVectorDataPlug *AvReader::availableFramesPlug() const
 {
-  return getChild<Gaffer::IntVectorDataPlug>(FirstPlugIndex + 3);
-}
-
-Gaffer::IntPlug *AvReader::channelInterpretationPlug()
-{
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 4);
-}
-
-const Gaffer::IntPlug *AvReader::channelInterpretationPlug() const
-{
-  return getChild<Gaffer::IntPlug>(FirstPlugIndex + 4);
+  constexpr size_t kPlugIndex = 3;
+  return getChild<Gaffer::IntVectorDataPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 Gaffer::ObjectVectorPlug *AvReader::_tileBatchPlug()
 {
-  return getChild<Gaffer::ObjectVectorPlug>(FirstPlugIndex + 5);
+  constexpr size_t kPlugIndex = 4;
+  return getChild<Gaffer::ObjectVectorPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 const Gaffer::ObjectVectorPlug *AvReader::_tileBatchPlug() const
 {
-  return getChild<Gaffer::ObjectVectorPlug>(FirstPlugIndex + 5);
+  constexpr size_t kPlugIndex = 4;
+  return getChild<Gaffer::ObjectVectorPlug>(FirstPlugIndex + kPlugIndex);
 }
 
 void AvReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const
 {
+  IECore::msg(IECore::Msg::Info, "AvReader", "affects");
+
   GafferImage::ImageNode::affects(input, outputs);
 
   if (input == fileNamePlug() || input == refreshCountPlug()) {
     outputs.push_back(availableFramesPlug());
   }
 
-  if (input == fileNamePlug() || input == refreshCountPlug() || input == missingFrameModePlug()
-      || input == channelInterpretationPlug()) {
+  if (input == fileNamePlug() || input == refreshCountPlug() || input == missingFrameModePlug()) {
     outputs.push_back(_tileBatchPlug());
   }
 
-  if (input == fileNamePlug() || input == refreshCountPlug() || input == missingFrameModePlug()
-      || input == channelInterpretationPlug()) {
+  if (input == fileNamePlug() || input == refreshCountPlug() || input == missingFrameModePlug()) {
     for (Gaffer::ValuePlug::Iterator it(outPlug()); !it.done(); ++it) {
       outputs.push_back(it->get());
     }
@@ -155,12 +153,13 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
     fileNamePlug()->hash(h);
     refreshCountPlug()->hash(h);
     missingFrameModePlug()->hash(h);
-    channelInterpretationPlug()->hash(h);
   }
 }
 
 void AvReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const
 {
+  IECore::msg(IECore::Msg::Info, "AvReader", "compute");
+
   if (output == availableFramesPlug()) {
 #if 0
     FileSequencePtr fileSequence = nullptr;
@@ -178,8 +177,16 @@ void AvReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context
       static_cast<IntVectorDataPlug *>(output)->setToDefault();
     }
 #endif
+
+#if 1
+    IECore::IntVectorDataPtr resultData = new IECore::IntVectorData;
+    auto &result = resultData->writable();
+    result.resize(30);
+    int j = 3;
+    for (auto &&i : result) { i = j++; }
+#endif
   } else if (output == _tileBatchPlug()) {
-    //const auto tileBatchIndex = context->get<Imath::V3i>(kTileBatchIndexContextName);
+    // const auto tileBatchIndex = context->get<Imath::V3i>(kTileBatchIndexContextName);
 
     Gaffer::Context::EditableScope c(context);
     c.remove(kTileBatchIndexContextName);
@@ -210,7 +217,6 @@ void AvReader::hashViewNames(const GafferImage::ImagePlug *parent,
   // hashFileName(context, h);
   refreshCountPlug()->hash(h);
   missingFrameModePlug()->hash(h);
-  channelInterpretationPlug()->hash(h);// Affects whether "main" is interpreted as "default"
 }
 
 IECore::ConstStringVectorDataPtr AvReader::computeViewNames(const Gaffer::Context * /*context*/,
@@ -361,7 +367,6 @@ void AvReader::hashSampleOffsets(const GafferImage::ImagePlug *parent,
     fileNamePlug()->hash(h);
     refreshCountPlug()->hash(h);
     missingFrameModePlug()->hash(h);
-    channelInterpretationPlug()->hash(h);
   }
 }
 
@@ -381,7 +386,6 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
   fileNamePlug()->hash(h);
   refreshCountPlug()->hash(h);
   missingFrameModePlug()->hash(h);
-  channelInterpretationPlug()->hash(h);
   h.append(context->get<std::string>(
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
@@ -408,7 +412,6 @@ void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
     fileNamePlug()->hash(h);
     refreshCountPlug()->hash(h);
     missingFrameModePlug()->hash(h);
-    channelInterpretationPlug()->hash(h);
   }
 }
 
@@ -417,6 +420,8 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   const Gaffer::Context *context,
   const GafferImage::ImagePlug *parent) const
 {
+  IECore::msg(IECore::Msg::Info, "AvReader", "computeChannelData");
+
   GafferImage::ImagePlug::GlobalScope c(context);
   // if (!file) { return parent->channelDataPlug()->defaultValue(); }
   return parent->channelDataPlug()->defaultValue();
@@ -438,7 +443,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 }
 
 
-void AvReader::plugSet(Gaffer::Plug *plug)
+void AvReader::_plugSet(Gaffer::Plug *plug)
 {
   // This clears the cache every time the refresh count is updated, so you don't get entries
   // from old files hanging around.
