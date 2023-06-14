@@ -22,12 +22,6 @@ public:
     TypeId::kAvReaderTypeId,
     GafferImage::ImageNode);
 
-  enum class MissingFrameMode : int {
-    kError = 0,
-    kBlack,
-    kHold,
-  };
-
   Gaffer::StringPlug *fileNamePlug();
   const Gaffer::StringPlug *fileNamePlug() const;
 
@@ -35,16 +29,19 @@ public:
   Gaffer::IntPlug *refreshCountPlug();
   const Gaffer::IntPlug *refreshCountPlug() const;
 
+#if 0
+  enum class MissingFrameMode : int {
+    kError = 0,
+    kBlack,
+    kHold,
+  };
+
   Gaffer::IntPlug *missingFrameModePlug();
   const Gaffer::IntPlug *missingFrameModePlug() const;
+#endif
 
   Gaffer::IntVectorDataPlug *availableFramesPlug();
   const Gaffer::IntVectorDataPlug *availableFramesPlug() const;
-
-#if 0
-  Gaffer::IntPlug *channelInterpretationPlug();
-  const Gaffer::IntPlug *channelInterpretationPlug() const;
-#endif
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
 
@@ -54,8 +51,7 @@ protected:
     IECore::MurmurHash &h) const override;
 
   void compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const override;
-  // Gaffer::ValuePlug::CachePolicy computeCachePolicy( const Gaffer::ValuePlug *output ) const
-  // override;
+  Gaffer::ValuePlug::CachePolicy computeCachePolicy(const Gaffer::ValuePlug *output) const override;
 
   void hashViewNames(const GafferImage::ImagePlug *parent,
     const Gaffer::Context *context,

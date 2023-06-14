@@ -27,7 +27,7 @@ Gaffer.Metadata.registerNode(
 
 			"plugValueWidget:type", "GafferUI.FileSystemPathPlugValueWidget",
 			"path:leaf", True,
-			"path:bookmarks", "image",
+			#"path:bookmarks", "image",
 			# TODO(tohi): get supported extensions from libav?
 			# "fileSystemPath:extensions", " ".join( GafferImage.ImageReader.supportedExtensions() ),
 			#"fileSystemPath:extensionsLabel", "Show only video files",
@@ -71,7 +71,7 @@ Gaffer.Metadata.registerNode(
 
 			"description",
 			"""
-			The mode used detemine the mask behaviour for the start frame.
+			The mode used to determine the mask behaviour for the start frame.
 			""",
 
 			"preset:None", IlpGafferMovie.MovieReader.FrameMaskMode.None_,
@@ -104,10 +104,9 @@ Gaffer.Metadata.registerNode(
 			"description",
 			"""
 			Masks frames which follow the specified end frame.
-			The default is to treat them based on the MissingFrameMode,
-			but they can also be clamped to the end frame, or
-			return a black image which matches the data window
-			and display window of the end frame.
+			They can be clamped to the end frame, or eturn a 
+			black image which matches the data window and display 
+			window of the end frame.
 			""",
 
 			"plugValueWidget:type", "GafferUI.LayoutPlugValueWidget",
@@ -121,7 +120,7 @@ Gaffer.Metadata.registerNode(
 
 			"description",
 			"""
-			The mode used detemine the mask behaviour for the end frame.
+			The mode used to determine the mask behaviour for the end frame.
 			""",
 
 			"preset:None", IlpGafferMovie.MovieReader.FrameMaskMode.None_,

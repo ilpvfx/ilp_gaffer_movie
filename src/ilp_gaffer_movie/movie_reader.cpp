@@ -102,8 +102,6 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     Plug::In,
     new IECore::CompoundData,
     kPlugDefault & ~kPlugSerializable));
-  // addChild(new Gaffer::StringPlug(
-  //   "__intermediateColorSpace", Plug::Out, "", Plug::Default & ~Plug::Serialisable));
   addChild(new GafferImage::ImagePlug("__intermediateImage", 
     Plug::In, 
     kPlugDefault & ~kPlugSerializable));
@@ -117,10 +115,7 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   avReader->fileNamePlug()->setInput(fileNamePlug());
   avReader->refreshCountPlug()->setInput(refreshCountPlug());
   _intermediateMetadataPlug()->setInput(avReader->outPlug()->metadataPlug());
-
   _intermediateImagePlug()->setInput(avReader->outPlug());
-
-  // outPlug()->setInput(inPlug());
 }
 
 Gaffer::StringPlug *MovieReader::fileNamePlug()
@@ -232,7 +227,7 @@ const AvReader *MovieReader::_avReader() const
 
 void MovieReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const
 {
-  IECore::msg(IECore::Msg::Info, "MovieReader", "affects");
+  //IECore::msg(IECore::Msg::Info, "MovieReader", "affects");
 
   ImageNode::affects(input, outputs);
 
