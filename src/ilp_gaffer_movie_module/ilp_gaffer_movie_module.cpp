@@ -24,10 +24,11 @@ BOOST_PYTHON_MODULE(_IlpGafferMovie)// NOLINT
   }
 
   {
-    using MovieWriterWrapper = GafferDispatchBindings::TaskNodeWrapper<IlpGafferMovie::MovieWriter>;  
+    using MovieWriterWrapper = GafferDispatchBindings::TaskNodeWrapper<IlpGafferMovie::MovieWriter>;
 
     // NOLINTNEXTLINE
-    scope s = GafferDispatchBindings::TaskNodeClass<IlpGafferMovie::MovieWriter, MovieWriterWrapper>();
+    scope s =
+      GafferDispatchBindings::TaskNodeClass<IlpGafferMovie::MovieWriter, MovieWriterWrapper>();
   }
 
 #if 0

@@ -1,6 +1,6 @@
-#include <ilp_mux/mux.hpp>
+#include <ilp_movie/mux.hpp>
 
-#include <array>
+#include <array>//std::array
 #include <cassert>// assert
 #include <cstdio>// std::snprintf
 #include <cstring>// std::memcpy
@@ -30,7 +30,7 @@ extern "C" {
 static std::mutex mutex;
 static std::function<void(const char *)> MuxLog = [](const char * /*s*/) {};
 
-namespace ilp {
+namespace ilp_movie {
 
 struct MuxImpl
 {
@@ -58,7 +58,7 @@ struct MuxImpl
   // const AVCodec *video_codec = nullptr;
 };
 
-}// namespace ilp
+}// namespace ilp_movie
 
 namespace {
 
@@ -648,7 +648,7 @@ static void mux_log_callback(void *ptr, int level, const char *fmt, va_list vl)
   MuxLog(line.data());
 }
 
-namespace ilp {
+namespace ilp_movie {
 
 void MuxSetLogLevel(const MuxLogLevel level)
 {
@@ -959,7 +959,7 @@ void MuxFree(MuxContext *const mux_ctx)
   mux_ctx->impl = nullptr;
 }
 
-}// namespace ilp
+}// namespace ilp_movie
 
 #if 0
   // Create a new scaling context to match the tmp frame and out frame

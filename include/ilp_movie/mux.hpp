@@ -2,9 +2,9 @@
 
 #include <functional>// std::function
 
-#include <ilp_mux/ilp_mux_export.hpp>
+#include <ilp_movie/ilp_movie_export.hpp>
 
-namespace ilp {
+namespace ilp_movie {
 
 enum class MuxLogLevel : int {
   // Print no output.
@@ -37,10 +37,10 @@ enum class MuxLogLevel : int {
   kTrace,
 };
 
-ILP_MUX_EXPORT
+ILP_MOVIE_EXPORT
 void MuxSetLogLevel(MuxLogLevel level);
 
-ILP_MUX_EXPORT
+ILP_MOVIE_EXPORT
 void MuxSetLogCallback(const std::function<void(const char *)> &cb);
 
 struct MuxImpl;
@@ -261,7 +261,7 @@ struct MuxFrame
 //
 // If false is returned, the internal resources could not be allocated. The mux context will be
 // unusable. There is no need to call MuxFree{} in this case.
-[[nodiscard]] ILP_MUX_EXPORT auto MuxInit(MuxContext *mux_ctx) -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxInit(MuxContext *mux_ctx) -> bool;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.
@@ -271,14 +271,14 @@ struct MuxFrame
 //
 // Note that the frame's width/height must match the corresponding values on the MuxContext since
 // we currently don't support pixel scaling.
-[[nodiscard]] ILP_MUX_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &frame)
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &frame)
   -> bool;
 
 // Finalize the file by flushing streams and possibly performing other operations.
 //
 // Returns true if successful, otherwise false.
 // Note that the MuxContext must be manually free'd using MuxFreeImpl{} regardless of success.
-[[nodiscard]] ILP_MUX_EXPORT auto MuxFinish(const MuxContext &mux_ctx) -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxFinish(const MuxContext &mux_ctx) -> bool;
 
 // Free the resources allocated by the implementation in MuxInit{}. The implementation pointer will
 // be set to null.
@@ -287,7 +287,6 @@ struct MuxFrame
 //
 // Note: Only MuxContext instances that have been passed to a successful MuxInit{} call need to free
 // their implementations.
-ILP_MUX_EXPORT
-void MuxFree(MuxContext *mux_ctx);
+ILP_MOVIE_EXPORT void MuxFree(MuxContext *mux_ctx);
 
-}// namespace ilp
+}// namespace ilp_movie

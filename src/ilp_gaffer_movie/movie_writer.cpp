@@ -9,7 +9,7 @@
 
 // #include <GafferImage/ImagePlug.h>
 
-#include <ilp_mux/mux.hpp>
+#include <ilp_movie/mux.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieWriter);
 
@@ -260,13 +260,13 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
   // Setup muxer.
   //
   // NOTE(tohi): We cannot set the width and height until we have "seen" the first image.
-  ilp::MuxSetLogLevel(ilp::MuxLogLevel::kInfo);
-  ilp::MuxSetLogCallback([](const char *s) {
+  ilp_movie::MuxSetLogLevel(ilp_movie::MuxLogLevel::kInfo);
+  ilp_movie::MuxSetLogCallback([](const char *s) {
     IECore::msg(IECore::Msg::Info, "MovieWriterSequential::mux", std::string{ s });
   });
 
   bool mux_init = false;
-  ilp::MuxContext mux_ctx = {};
+  ilp_movie::MuxContext mux_ctx = {};
   mux_ctx.filename = filename.c_str();
   mux_ctx.fps = static_cast<double>(context->getFramesPerSecond());
   mux_ctx.color_range = color_range.c_str();
@@ -332,7 +332,7 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     }
 
     // Pass a frame to the muxer.
-    ilp::MuxFrame mux_frame = {};
+    ilp_movie::MuxFrame mux_frame = {};
     mux_frame.width = mux_ctx.width;
     mux_frame.height = mux_ctx.height;
     mux_frame.frame_nb = frame;
