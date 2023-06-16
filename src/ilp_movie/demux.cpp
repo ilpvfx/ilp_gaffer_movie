@@ -53,7 +53,7 @@ extern "C" {
   }
 
   // Select the video stream.
-  const AVCodec *dec;
+  const AVCodec *dec = nullptr;
   *video_stream_index = av_find_best_stream(*ifmt_ctx,
     AVMEDIA_TYPE_VIDEO,
     /*wanted_stream_nb=*/-1,
@@ -68,12 +68,13 @@ extern "C" {
   /* create decoding context */
   *dec_ctx = avcodec_alloc_context3(dec);
   if (*dec_ctx == nullptr) { return AVERROR(ENOMEM); }
+  // NOLINTNEXTLINE
   avcodec_parameters_to_context(*dec_ctx, (*ifmt_ctx)->streams[*video_stream_index]->codecpar);
 
   /* init the video decoder */
   if (const int ret = avcodec_open2(*dec_ctx, dec, /*options=*/nullptr); ret < 0) {
     ilp_movie::LogAvError("Cannot open video decoder", ret);
-    return ret;
+    return false;
   }
 
   return true;
@@ -151,14 +152,15 @@ auto DemuxInit(DemuxContext *const demux_ctx) noexcept -> bool
          / (static_cast<int64_t>(frame_rate.num) * st->time_base.num);
 }
 
-auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *const frame) noexcept
-  -> bool
+auto DemuxSeek(const DemuxContext &demux_ctx,
+  const int frame_pos,
+  DemuxFrame *const /*frame*/) noexcept -> bool
 {
   const auto *impl = demux_ctx.impl;
   if (impl == nullptr) { return false; }
 
   const int64_t seek_target =
-    FrameToPts(impl->ifmt_ctx->streams[impl->video_stream_index], frame_pos);
+    FrameToPts(impl->ifmt_ctx->streams[impl->video_stream_index], frame_pos);// NOLINT
   // seek_target = av_rescale_q(
   //   seek_target, AV_TIME_BASE_Q, impl->ifmt_ctx->streams[impl->video_stream_index]->time_base);
 
@@ -178,13 +180,14 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
     }
 
     if (const int ret = avcodec_send_packet(impl->dec_ctx, impl->dec_pkt); ret < 0) {
-      av_log(NULL, AV_LOG_ERROR, "Error while sending a packet for decoding");
+      LogAvError("Error while sending a packet for decoding", ret);
+      return false;
     }
 
     int ret = 0;
     while (ret >= 0) {
       ret = avcodec_receive_frame(impl->dec_ctx, impl->dec_frame);
-      if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+      if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
         break;
       } else if (ret < 0) {
         LogAvError("Error while receiving a frame from the decoder", ret);

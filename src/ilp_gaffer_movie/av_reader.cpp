@@ -421,7 +421,7 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
 }
 
 IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Context * /*context*/,
-  const GafferImage::ImagePlug *parent) const
+  const GafferImage::ImagePlug */*parent*/) const
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeChannelNames");
 
@@ -463,7 +463,7 @@ void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
 IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &channelName,
   const Imath::V2i &tileOrigin,
   const Gaffer::Context *context,
-  const GafferImage::ImagePlug *parent) const
+  const GafferImage::ImagePlug * /*parent*/) const
 {
   IECore::msg(IECore::Msg::Info,
     "AvReader",
@@ -487,14 +487,11 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 
   IECore::FloatVectorDataPtr channelData = new IECore::FloatVectorData;
   auto &channel = channelData->writable();
+  const auto tile_size = static_cast<std::size_t>(GafferImage::ImagePlug::tileSize());
   if (channelName == GafferImage::ImageAlgo::channelNameR) {
-    channel.resize(static_cast<std::size_t>(
-                    GafferImage::ImagePlug::tileSize() * GafferImage::ImagePlug::tileSize()),
-      1.0F);
+    channel.resize(tile_size * tile_size, 1.0F);
   } else {
-    channel.resize(static_cast<std::size_t>(
-                    GafferImage::ImagePlug::tileSize() * GafferImage::ImagePlug::tileSize()),
-      0.0F);
+    channel.resize(tile_size * tile_size, 0.0F);
   }
 
   return channelData;

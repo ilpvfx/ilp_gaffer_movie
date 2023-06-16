@@ -227,7 +227,7 @@ const AvReader *MovieReader::_avReader() const
 
 void MovieReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const
 {
-  //IECore::msg(IECore::Msg::Info, "MovieReader", "affects");
+  // IECore::msg(IECore::Msg::Info, "MovieReader", "affects");
 
   ImageNode::affects(input, outputs);
 
@@ -315,7 +315,7 @@ Imath::Box2i MovieReader::computeDataWindow(const Gaffer::Context *context,
   return _intermediateImagePlug()->dataWindowPlug()->getValue();
 }
 
-void MovieReader::hashMetadata(const GafferImage::ImagePlug *parent,
+void MovieReader::hashMetadata(const GafferImage::ImagePlug * /*parent*/,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
@@ -366,7 +366,7 @@ bool MovieReader::computeDeep(const Gaffer::Context *context,
   // return false;
 }
 
-void MovieReader::hashSampleOffsets(const GafferImage::ImagePlug *parent,
+void MovieReader::hashSampleOffsets(const GafferImage::ImagePlug * /*parent*/,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
@@ -415,7 +415,7 @@ IECore::ConstStringVectorDataPtr MovieReader::computeChannelNames(const Gaffer::
   return _intermediateImagePlug()->channelNamesPlug()->getValue();
 }
 
-void MovieReader::hashChannelData(const GafferImage::ImagePlug *parent,
+void MovieReader::hashChannelData(const GafferImage::ImagePlug * /*parent*/,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {

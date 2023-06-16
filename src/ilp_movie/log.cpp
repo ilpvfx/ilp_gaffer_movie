@@ -65,7 +65,7 @@ static std::function<void(int, const char *)> IlpLogCallback =
   try {
     // NOTE(tohi): Not adding newline character!
     std::ostringstream oss;
-    oss << "[ilp_movie]" << LogLevelString(ilp_movie::LogLevel::kError) << msg;
+    oss << "[ilp_movie]" << LogLevelString(level) << msg;
     s = oss.str();
   } catch (...) {
     // Swallow exception, returned string should be empty.
