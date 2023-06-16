@@ -139,7 +139,7 @@ auto DemuxInit(DemuxContext *const demux_ctx) noexcept -> bool
           &impl->video_stream_index)) {
       return exit_func(/*success=*/false, demux_ctx);
     }
-    assert(impl->video_stream_index >= 0);
+    assert(impl->video_stream_index >= 0);// NOLINT
 
     av_dump_format(impl->ifmt_ctx, impl->video_stream_index, demux_ctx->filename, /*is_output=*/0);
 
