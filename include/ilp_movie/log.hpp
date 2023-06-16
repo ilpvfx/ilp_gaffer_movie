@@ -2,7 +2,7 @@
 
 #include <functional>// std::function
 
-#include <ilp_mux/ilp_mux_export.hpp>
+#include <ilp_movie/ilp_movie_export.hpp>
 
 namespace ilp_movie {
 
@@ -38,21 +38,21 @@ namespace LogLevel {
 }// namespace LogLevel
 
 // Set the implementation (libav) log level.
-ILP_MUX_EXPORT
+ILP_MOVIE_EXPORT
 void SetLogLevel(int level) noexcept;
 
-ILP_MUX_EXPORT
+ILP_MOVIE_EXPORT
 void SetLogCallback(const std::function<void(int, const char *)> &cb) noexcept;
 
 // Functions below are for internal use.
 
-ILP_MUX_NO_EXPORT
+ILP_MOVIE_NO_EXPORT
 void LogMsg(int level, const char *msg) noexcept;
 
-ILP_MUX_NO_EXPORT
+ILP_MOVIE_NO_EXPORT
 void LogInfo(const char *msg) noexcept;
 
-ILP_MUX_NO_EXPORT
+ILP_MOVIE_NO_EXPORT
 void LogError(const char *msg) noexcept;
 
 // NOTE: errnum is a libav error code (<0) returned by some function.
@@ -63,7 +63,7 @@ void LogError(const char *msg) noexcept;
 //     return false;
 //   }
 //
-ILP_MUX_NO_EXPORT
+ILP_MOVIE_NO_EXPORT
 void LogAvError(const char *msg, const int errnum = 0) noexcept;
 
 }// namespace ilp_movie

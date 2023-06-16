@@ -65,13 +65,22 @@ extern "C" {
     return false;
   }
 
-  /* create decoding context */
+  // Create decoding context.
   *dec_ctx = avcodec_alloc_context3(dec);
-  if (*dec_ctx == nullptr) { return AVERROR(ENOMEM); }
-  // NOLINTNEXTLINE
-  avcodec_parameters_to_context(*dec_ctx, (*ifmt_ctx)->streams[*video_stream_index]->codecpar);
+  if (*dec_ctx == nullptr) {
+    ilp_movie::LogAvError("Cannot allocate context", AVERROR(ENOMEM));
+    return false;
+  }
 
-  /* init the video decoder */
+  // Copy decoder parameters to the input stream.
+  if (const int ret = avcodec_parameters_to_context(
+        *dec_ctx, (*ifmt_ctx)->streams[*video_stream_index]->codecpar);// NOLINT
+      ret < 0) {
+    ilp_movie::LogAvError("Could not copy decoder parameters to the output stream", ret);
+    return false;
+  }
+
+  // Init the video decoder.
   if (const int ret = avcodec_open2(*dec_ctx, dec, /*options=*/nullptr); ret < 0) {
     ilp_movie::LogAvError("Cannot open video decoder", ret);
     return false;
