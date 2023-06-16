@@ -10,6 +10,7 @@
 // #include <GafferImage/ImagePlug.h>
 
 #include <ilp_movie/mux.hpp>
+#include <ilp_movie/log.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieWriter);
 
@@ -260,9 +261,28 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
   // Setup muxer.
   //
   // NOTE(tohi): We cannot set the width and height until we have "seen" the first image.
-  ilp_movie::MuxSetLogLevel(ilp_movie::MuxLogLevel::kInfo);
-  ilp_movie::MuxSetLogCallback([](const char *s) {
-    IECore::msg(IECore::Msg::Info, "MovieWriterSequential::mux", std::string{ s });
+  ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
+  ilp_movie::SetLogCallback([](int level, const char *s) {
+    auto iec_level = IECore::MessageHandler::Level::Invalid;
+    // clang-format off
+    switch (level) {
+    case ilp_movie::LogLevel::kPanic:
+    case ilp_movie::LogLevel::kFatal:
+    case ilp_movie::LogLevel::kError:
+      iec_level = IECore::MessageHandler::Level::Error; break;
+    case ilp_movie::LogLevel::kWarning:
+      iec_level = IECore::MessageHandler::Level::Warning; break;
+    case ilp_movie::LogLevel::kInfo:
+    case ilp_movie::LogLevel::kVerbose:
+    case ilp_movie::LogLevel::kDebug:
+    case ilp_movie::LogLevel::kTrace:
+      iec_level = IECore::MessageHandler::Level::Info; break;
+    case ilp_movie::LogLevel::kQuiet: // ???
+    default: 
+      break;
+    }
+    // clang-format on
+    IECore::msg(iec_level, "MovieWriter", std::string{ s });
   });
 
   bool mux_init = false;

@@ -6,46 +6,64 @@
 
 namespace ilp_movie {
 
-enum class LogLevel : int {
+namespace LogLevel {
   // Print no output.
-  kQuiet = 0,
+  constexpr int kQuiet = -8;
 
   // Something went really wrong, crashing now.
-  kPanic,
+  constexpr int kPanic = 0;
 
   // Something went wrong and recovery is not possible.
-  kFatal,
+  constexpr int kFatal = 8;
 
   // Something went wrong and cannot losslessly be recovered.
   // However, not all future data is affected.
-  kError,
+  constexpr int kError = 16;
 
   // Something somehow does not look correct. This may or may not
   // lead to problems.
-  kWarning,
+  constexpr int kWarning = 24;
 
   // Standard information.
-  kInfo,
+  constexpr int kInfo = 32;
 
   // Detailed information.
-  kVerbose,
+  constexpr int kVerbose = 40;
 
   // Stuff which is only useful for developers.
-  kDebug,
+  constexpr int kDebug = 48;
 
   // Extremely verbose debugging, useful for development.
-  kTrace,
-};
+  constexpr int kTrace = 56;
+}// namespace LogLevel
+
+// Set the implementation (libav) log level.
+ILP_MUX_EXPORT
+void SetLogLevel(int level) noexcept;
 
 ILP_MUX_EXPORT
-void SetLogLevel(LogLevel level);
+void SetLogCallback(const std::function<void(int, const char *)> &cb) noexcept;
 
-ILP_MUX_EXPORT
-void SetLogCallback(const std::function<void(const char *)> &cb);
+// Functions below are for internal use.
 
-void LogError(const char *msg, const int errnum = 0);
-void LogInfo(const char *msg);
+ILP_MUX_NO_EXPORT
+void LogMsg(int level, const char *msg) noexcept;
 
-void InstallLogCallback();
+ILP_MUX_NO_EXPORT
+void LogInfo(const char *msg) noexcept;
+
+ILP_MUX_NO_EXPORT
+void LogError(const char *msg) noexcept;
+
+// NOTE: errnum is a libav error code (<0) returned by some function.
+// Example:
+//
+//   if (const int ret = avcodec_parameters_from_context(...); ret < 0) {
+//     ilp_movie::LogAvError("Encoder parameters error", ret);
+//     return false;
+//   }
+//
+ILP_MUX_NO_EXPORT
+void LogAvError(const char *msg, const int errnum = 0) noexcept;
 
 }// namespace ilp_movie

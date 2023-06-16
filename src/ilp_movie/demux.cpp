@@ -31,24 +31,24 @@ extern "C" {
 {
   *dec_pkt = av_packet_alloc();
   if (*dec_pkt == nullptr) {
-    ilp_movie::LogError("Cannot not allocate packet");
+    ilp_movie::LogAvError("Cannot not allocate packet");
     return false;
   }
 
   *dec_frame = av_frame_alloc();
   if (*dec_frame == nullptr) {
-    ilp_movie::LogError("Cannot allocate frame");
+    ilp_movie::LogAvError("Cannot allocate frame");
     return false;
   }
 
   if (const int ret = avformat_open_input(ifmt_ctx, filename, /*fmt=*/nullptr, /*options=*/nullptr);
       ret < 0) {
-    ilp_movie::LogError("Cannot open input file", ret);
+    ilp_movie::LogAvError("Cannot open input file", ret);
     return false;
   }
 
   if (const int ret = avformat_find_stream_info(*ifmt_ctx, /*options=*/nullptr); ret < 0) {
-    ilp_movie::LogError("Cannot find stream information", ret);
+    ilp_movie::LogAvError("Cannot find stream information", ret);
     return false;
   }
 
@@ -61,7 +61,7 @@ extern "C" {
     &dec,
     /*flags=*/0);
   if (*video_stream_index < 0) {
-    ilp_movie::LogError("Cannot find a video stream in the input file", *video_stream_index);
+    ilp_movie::LogAvError("Cannot find a video stream in the input file", *video_stream_index);
     return false;
   }
 
@@ -72,7 +72,7 @@ extern "C" {
 
   /* init the video decoder */
   if (const int ret = avcodec_open2(*dec_ctx, dec, /*options=*/nullptr); ret < 0) {
-    ilp_movie::LogError("Cannot open video decoder", ret);
+    ilp_movie::LogAvError("Cannot open video decoder", ret);
     return ret;
   }
 
@@ -166,14 +166,14 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
   if (const int ret =
         av_seek_frame(impl->ifmt_ctx, impl->video_stream_index, seek_target, kSeekFlags);
       ret < 0) {
-    LogError("Seek error", ret);
+    LogAvError("Seek error", ret);
     return false;
   }
 
   // while(...)
   {
     if (const int ret = av_read_frame(impl->ifmt_ctx, impl->dec_pkt); ret < 0) {
-      LogError("Cannot read frame", ret);
+      LogAvError("Cannot read frame", ret);
       return false;
     }
 
@@ -187,7 +187,7 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
         break;
       } else if (ret < 0) {
-        LogError("Error while receiving a frame from the decoder", ret);
+        LogAvError("Error while receiving a frame from the decoder", ret);
         return false;
       }
 

@@ -1,7 +1,8 @@
 #include <ilp_movie/log.hpp>
 
 #include <array>// std::array
-#include <mutex>//std::mutex, std::scoped_lock
+#include <iostream>// std::cerr
+#include <mutex>// std::mutex, std::scoped_lock
 #include <sstream>// std::ostringstream
 
 // clang-format off
@@ -12,71 +13,155 @@ extern "C" {
 // clang-format on
 
 static std::mutex mutex;
-static std::function<void(const char *)> IlpVideoLog = [](const char * /*s*/) {};
 
-// Hook into the av_log calls so that we can pass a string to a user-provided logger.
-// Needs to be thread-safe!
-static void IlpMovieLogCallback(void *ptr, int level, const char *fmt, va_list vl)
+static int IlpLogLevel = ilp_movie::LogLevel::kInfo;
+
+// clang-format off
+static std::function<void(int, const char *)> IlpLogCallback = 
+  [](int /*level*/, const char * /*s*/) noexcept {};
+// clang-format on
+
+[[nodiscard]] static constexpr auto GetIlpLogLevel(const int av_level) noexcept -> int
 {
-  static constexpr int kLineSize = 1024;
-  std::array<char, kLineSize> line = {};
-  static int print_prefix = 1;
-
-  std::scoped_lock lock{ mutex };
-
-  const int ret = av_log_format_line2(ptr, level, fmt, vl, line.data(), kLineSize, &print_prefix);
-  if (ret < 0) {
-    IlpVideoLog("[ilp_movie] Logging error\n");
-    return;
-  } else if (!(ret < kLineSize)) {
-    IlpVideoLog("[ilp_movie] Truncated log message\n");
+  // clang-format off
+  auto level = ilp_movie::LogLevel::kInfo;
+  switch (av_level) {
+  case AV_LOG_QUIET:   level = ilp_movie::LogLevel::kQuiet;   break;
+  case AV_LOG_PANIC:   level = ilp_movie::LogLevel::kPanic;   break;
+  case AV_LOG_FATAL:   level = ilp_movie::LogLevel::kFatal;   break;
+  case AV_LOG_ERROR:   level = ilp_movie::LogLevel::kError;   break;
+  case AV_LOG_WARNING: level = ilp_movie::LogLevel::kWarning; break;
+  case AV_LOG_INFO:    level = ilp_movie::LogLevel::kInfo;    break;
+  case AV_LOG_VERBOSE: level = ilp_movie::LogLevel::kVerbose; break;
+  case AV_LOG_DEBUG:   level = ilp_movie::LogLevel::kDebug;   break;
+  case AV_LOG_TRACE:   level = ilp_movie::LogLevel::kTrace;   break;
+  default:                                                    break;
   }
-  IlpVideoLog(line.data());
+  // clang-format on
+  return level;
 }
 
-namespace ilp_movie {
-
-void SetLogLevel(const LogLevel level)
+[[nodiscard]] static constexpr auto LogLevelString(const int level) noexcept -> const char *
 {
   // clang-format off
   switch (level) {
-  case LogLevel::kQuiet:   av_log_set_level(AV_LOG_QUIET);   break;
-  case LogLevel::kPanic:   av_log_set_level(AV_LOG_PANIC);   break;
-  case LogLevel::kFatal:   av_log_set_level(AV_LOG_FATAL);   break;
-  case LogLevel::kError:   av_log_set_level(AV_LOG_ERROR);   break;
-  case LogLevel::kWarning: av_log_set_level(AV_LOG_WARNING); break;
-  case LogLevel::kInfo:    av_log_set_level(AV_LOG_INFO);    break;
-  case LogLevel::kVerbose: av_log_set_level(AV_LOG_VERBOSE); break;
-  case LogLevel::kDebug:   av_log_set_level(AV_LOG_DEBUG);   break;
-  case LogLevel::kTrace:   av_log_set_level(AV_LOG_TRACE);   break;
-  default: /* Do nothing, keep current log level. */         break; 
+  case ilp_movie::LogLevel::kQuiet:   return "[QUIET]"; // ???
+  case ilp_movie::LogLevel::kPanic:   return "[PANIC]";
+  case ilp_movie::LogLevel::kFatal:   return "[FATAL]";
+  case ilp_movie::LogLevel::kError:   return "[ERROR]";
+  case ilp_movie::LogLevel::kWarning: return "[WARNING]";
+  case ilp_movie::LogLevel::kInfo:    return "[INFO]";
+  case ilp_movie::LogLevel::kVerbose: return "[VERBOSE]";
+  case ilp_movie::LogLevel::kDebug:   return "[DEBUG]";
+  case ilp_movie::LogLevel::kTrace:   return "[TRACE]";
+  default:                            return "[UNKNOWN]";
   }
   // clang-format on
 }
 
-void SetLogCallback(const std::function<void(const char *)> &cb) { IlpVideoLog = cb; }
-
-void LogError(const char *msg, const int errnum)
+[[nodiscard]] static auto BuildMessage(const int level, const char *msg) noexcept -> std::string
 {
-  std::ostringstream oss;
-  oss << "[ilp_movie] " << msg;
-  if (errnum < 0) {
-    std::array<char, AV_ERROR_MAX_STRING_SIZE> errbuf = {};
-    av_strerror(errnum, errbuf.data(), AV_ERROR_MAX_STRING_SIZE);
-    oss << ": " << errbuf.data() << '\n';
-  } else {
-    oss << '\n';
+  std::string s;
+  try {
+    // NOTE(tohi): Not adding newline character!
+    std::ostringstream oss;
+    oss << "[ilp_movie]" << LogLevelString(ilp_movie::LogLevel::kError) << msg;
+    s = oss.str();
+  } catch (...) {
+    // Swallow exception, returned string should be empty.
   }
-  IlpVideoLog(oss.str().c_str());
+  return s;
 }
 
-void LogInfo(const char *msg)
+// Hook into the av_log calls so that we can pass a string to a user-provided logger.
+// Needs to be thread-safe!
+static void IlpMovieAvLogCallback(void *ptr, int level, const char *fmt, va_list vl) noexcept
 {
-  std::ostringstream oss;
-  oss << "[ilp_movie] " << msg << '\n';
-  IlpVideoLog(oss.str().c_str());
+  static constexpr int kLineSize = 1024;
+  static std::array<char, kLineSize> line = {};
+  static int print_prefix = 1;
+
+  try {
+    // Filter messages based on log level. We can do this before
+    // locking the mutex.
+    const auto ilp_level = GetIlpLogLevel(level);
+    if (ilp_level > IlpLogLevel) { return; }
+
+    std::scoped_lock lock{ mutex };
+    const int ret = av_log_format_line2(ptr, level, fmt, vl, line.data(), kLineSize, &print_prefix);
+
+    // Don't call LogMsg below, since we have already locked the mutex above.
+    if (ret < 0) {
+      IlpLogCallback(ilp_movie::LogLevel::kError,
+        BuildMessage(ilp_movie::LogLevel::kError, "Logging error\n").c_str());
+      return;
+    } else if (!(ret < kLineSize)) {
+      IlpLogCallback(ilp_movie::LogLevel::kError,
+        BuildMessage(ilp_movie::LogLevel::kError, "Truncated log message\n").c_str());
+    }
+
+    // Send raw message from libav to callback, don't add any decorations.
+    IlpLogCallback(ilp_level, line.data());
+  } catch (...) {
+    std::cerr << "unknown exception\n";
+  }
 }
 
-void InstallLogCallback() { av_log_set_callback(IlpMovieLogCallback); }
+namespace {
+struct AvLogCallbackInstaller
+{
+  AvLogCallbackInstaller() noexcept { av_log_set_callback(IlpMovieAvLogCallback); }
+};
+}// namespace
+static AvLogCallbackInstaller _dummy;
+
+namespace ilp_movie {
+
+void SetLogLevel(const int level) noexcept { IlpLogLevel = level; }
+
+void SetLogCallback(const std::function<void(int, const char *)> &cb) noexcept
+{
+  IlpLogCallback = cb;
+}
+
+void LogMsg(const int level, const char *msg) noexcept
+{
+  if (level > IlpLogLevel) { return; }
+
+  std::string s;
+  try {
+    // Filter messages based on log level.
+
+    s = BuildMessage(level, msg);
+
+    std::scoped_lock lock{ mutex };
+    IlpLogCallback(level, s.c_str());
+  } catch (...) {
+    std::cerr << "unknown exception\n";
+  }
+}
+
+void LogInfo(const char *msg) noexcept { LogMsg(LogLevel::kInfo, msg); }
+
+void LogError(const char *msg) noexcept { LogMsg(LogLevel::kError, msg); }
+
+void LogAvError(const char *msg, const int errnum) noexcept
+{
+  std::string s;
+  try {
+    std::ostringstream oss;
+    oss << msg;
+    if (errnum < 0) {
+      std::array<char, AV_ERROR_MAX_STRING_SIZE> errbuf = {};
+      av_strerror(errnum, errbuf.data(), AV_ERROR_MAX_STRING_SIZE);
+      oss << ": " << errbuf.data();
+    }
+    oss << '\n';
+    s = oss.str();
+    LogMsg(LogLevel::kError, s.c_str());
+  } catch (...) {
+    std::cerr << "unknown exception\n";
+  }
+}
 
 }// namespace ilp_movie
