@@ -55,9 +55,9 @@ struct MuxContext
   const char *filename = nullptr;
   const char *format_name = nullptr;
 
-  // Pixel resolution dimensions must be a multiple of two.
-  int width = 352;
-  int height = 288;
+  // Pixel resolution dimensions - must be a multiple of two.
+  int width = -1;
+  int height = -1;
   double fps = 24.0;
 
   const char *codec_name = nullptr;

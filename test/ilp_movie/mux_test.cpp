@@ -1,4 +1,4 @@
-#include <algorithm>//std::fill
+#include <algorithm>// std::fill
 #include <iostream>// std::cout, std::cerr
 #include <string>// std::string
 #include <vector>// std::vector
@@ -38,12 +38,11 @@ TEST_CASE("H264")
                              const std::uint32_t frame_count) {
     REQUIRE(frame_count > 0);
 
+    const auto w = static_cast<std::size_t>(mux_ctx.width);
+    const auto h = static_cast<std::size_t>(mux_ctx.height);
     std::vector<float> r = {};
     std::vector<float> g = {};
     std::vector<float> b = {};
-
-    const auto w = static_cast<std::size_t>(mux_ctx.width);
-    const auto h = static_cast<std::size_t>(mux_ctx.height);
     r.resize(w * h);
     g.resize(w * h);
     b.resize(w * h);
