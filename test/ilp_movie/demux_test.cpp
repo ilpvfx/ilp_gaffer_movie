@@ -1,5 +1,7 @@
+#include <chrono>
 #include <iostream>// std::cout, std::cerr
 #include <string>// std::string
+#include <thread>
 #include <vector>// std::vector
 
 // clang-format off
@@ -440,13 +442,14 @@ TEST_CASE("test")
   ilp_movie::MuxContext mux_ctx = {};
   mux_ctx.filename = "/tmp/demux.mov";
   mux_ctx.codec_name = "libx264";
-  //mux_ctx.color_range = "tv";
+  // mux_ctx.color_range = "tv";
   mux_ctx.width = 128;
   mux_ctx.height = 128;
   init_mux(&mux_ctx);
   write_frames(mux_ctx, /*frame_count=*/100);
   free_mux(&mux_ctx);
 
+  std::this_thread::sleep_for(std::chrono::seconds(2));
 
   ilp_movie::DemuxContext demux_ctx = {};
   demux_ctx.filename = "/tmp/demux.mov";

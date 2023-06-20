@@ -3,6 +3,7 @@
 #include <cassert>// assert
 #include <cerrno>// ENOMEM, etc
 #include <cstring>// std::memcpy
+#include <sstream>// TMP!!
 #include <vector>// std::vector
 
 // clang-format off
@@ -93,7 +94,7 @@ extern "C" {
 {
   bool got_frame = false;
   int ret = 0;
-  while (!got_frame && ret >= 0) {
+  while (!got_frame /* && ret >= 0*/) {
     // Read a packet from the file.
     if (ret = av_read_frame(ifmt_ctx, pkt); ret < 0) {
       ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot read packet\n");
@@ -129,10 +130,19 @@ extern "C" {
         }
 
         // Pull filtered frames from the filter graph.
-        for (;;) {
+        //while (!got_frame) {
+        while (ret >= 0) {
           ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
-          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) { break; }// NOLINT
-          if (ret < 0) { goto end; }
+          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
+            break;
+          }
+          if (ret < 0) { 
+            goto end; 
+          }
+
+          std::ostringstream oss;
+          oss << "frame->pts = " << filt_frame->pts << "\n";
+          ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
 
           //
           // ProcessFrame(frame)
@@ -150,12 +160,14 @@ extern "C" {
             std::memcpy(/*__dest=*/demux_frame->g.data(), /*__src=*/dec_frame->data[0], byte_count);
             std::memcpy(/*__dest=*/demux_frame->b.data(), /*__src=*/dec_frame->data[1], byte_count);
             std::memcpy(/*__dest=*/demux_frame->r.data(), /*__src=*/dec_frame->data[2], byte_count);
+
+            //got_frame = true;
+            goto end;
           }
           // else: unrecognized pixel format!
 
           // display_frame(filt_frame, buffersink_ctx->inputs[0]->time_base);
           av_frame_unref(filt_frame);
-          got_frame = true;
         }
         av_frame_unref(dec_frame);
       }
