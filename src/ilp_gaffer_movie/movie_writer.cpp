@@ -322,10 +322,9 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     mux_ctx.h264.qp = codec_settings->getChild<IntPlug>("qp")->getValue();
     // clang-format on
   } else if (codec == "prores") {
-    const auto p_str = codec_settings->getChild<StringPlug>("profile")->getValue();
-
     // clang-format off
     ilp_movie::ProRes::Profile profile = {};
+    const auto p_str = codec_settings->getChild<StringPlug>("profile")->getValue();
     if      (p_str == "proxy_10b"    ) { profile = ilp_movie::ProRes::Profile::proxy();    }
     else if (p_str == "lt_10b"       ) { profile = ilp_movie::ProRes::Profile::lt();       }
     else if (p_str == "standard_10b" ) { profile = ilp_movie::ProRes::Profile::standard(); }
