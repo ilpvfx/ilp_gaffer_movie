@@ -28,6 +28,7 @@ extern "C" {
 // clang-format on
 
 #include <ilp_movie/log.hpp>
+#include <internal/log_utils.hpp>
 
 namespace ilp_movie {
 
@@ -151,7 +152,7 @@ public:
         /*format_name=*/nullptr,
         filename);
       ret < 0 || *ofmt_ctx == nullptr) {
-    ilp_movie::LogAvError("Could not create output context", ret);
+    log_utils_internal::LogAvError("Could not create output context", ret);
     return exit_func(/*success=*/false);
   }
 
@@ -159,7 +160,7 @@ public:
   // NOTE(tohi): c is an unused legacy parameter.
   AVStream *out_stream = avformat_new_stream(*ofmt_ctx, /*c=*/nullptr);
   if (out_stream == nullptr) {
-    ilp_movie::LogError("Could not create output stream\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Could not create output stream\n");
     return exit_func(/*success=*/false);
   }
   out_stream->id = static_cast<int>((*ofmt_ctx)->nb_streams - 1U);
@@ -169,7 +170,7 @@ public:
   if (encoder == nullptr) {
     std::ostringstream oss;
     oss << "Could not find encoder '" << enc_name << "'\n";
-    ilp_movie::LogError(oss.str().c_str());
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, oss.str().c_str());
     return exit_func(/*success=*/false);
   }
 #if 0// Debugging.
@@ -181,12 +182,12 @@ public:
   // Allocate an encoder context using the chosen encoder.
   *enc_ctx = avcodec_alloc_context3(encoder);
   if (*enc_ctx == nullptr) {
-    ilp_movie::LogError("Could not allocate an encoding context\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Could not allocate an encoding context\n");
     return exit_func(/*success=*/false);
   }
   (*enc_ctx)->time_base = av_d2q(1.0 / fps, /*max=*/100000);
   if ((*enc_ctx)->time_base.den <= 0) {
-    ilp_movie::LogError("Could not create time base\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Could not create time base\n");
     return exit_func(/*success=*/false);
   }
 
@@ -222,12 +223,12 @@ public:
     oss << "Encoder options:\n";
     const auto entries = Entries(enc_opt);
     for (auto &&entry : entries) { oss << "('" << entry.first << "', '" << entry.second << "')\n"; }
-    ilp_movie::LogInfo(oss.str().c_str());
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
   }
 
   // Open the codec.
   if (const int ret = avcodec_open2(*enc_ctx, encoder, &enc_opt.dict); ret < 0) {
-    ilp_movie::LogAvError("Could not open video codec", ret);
+    log_utils_internal::LogAvError("Could not open video codec", ret);
     return exit_func(/*success=*/false);
   }
   if (!Empty(enc_opt)) {
@@ -236,12 +237,12 @@ public:
     const auto entries = Entries(enc_opt);
     for (auto &&entry : entries) { oss << "('" << entry.first << "', '" << entry.second << "'), "; }
     oss << '\n';
-    ilp_movie::LogError(oss.str().c_str());
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, oss.str().c_str());
     return exit_func(/*success=*/false);
   }
 
   if (const int ret = avcodec_parameters_from_context(out_stream->codecpar, *enc_ctx); ret < 0) {
-    ilp_movie::LogAvError("Could not copy encoder parameters to the output stream", ret);
+    log_utils_internal::LogAvError("Could not copy encoder parameters to the output stream", ret);
     return exit_func(/*success=*/false);
   }
   out_stream->time_base = (*enc_ctx)->time_base;
@@ -251,13 +252,15 @@ public:
   // Allocate a re-usable packet.
   *enc_pkt = av_packet_alloc();
   if (*enc_pkt == nullptr) {
-    ilp_movie::LogAvError("Could not allocate packet for encoding", /*errnum=*/AVERROR(ENOMEM));
+    log_utils_internal::LogAvError(
+      "Could not allocate packet for encoding", /*errnum=*/AVERROR(ENOMEM));
     return exit_func(/*success=*/false);
   }
 
   *enc_frame = av_frame_alloc();
   if (*enc_frame == nullptr) {
-    ilp_movie::LogAvError("Could not allocate frame for encoding ", /*errnum=*/AVERROR(ENOMEM));
+    log_utils_internal::LogAvError(
+      "Could not allocate frame for encoding ", /*errnum=*/AVERROR(ENOMEM));
     return exit_func(/*success=*/false);
   }
 
@@ -266,7 +269,7 @@ public:
     if (const int ret = avio_open(&(*ofmt_ctx)->pb, filename, AVIO_FLAG_WRITE); ret < 0) {
       std::ostringstream oss;
       oss << "Could not open output file '" << filename << "'";
-      ilp_movie::LogAvError(oss.str().c_str(), ret);
+      log_utils_internal::LogAvError(oss.str().c_str(), ret);
       return exit_func(/*success=*/false);
     }
   }
@@ -274,7 +277,7 @@ public:
   // Write the output file header.
   Options fmt_opt = {};
   if (const int ret = avformat_write_header(*ofmt_ctx, &fmt_opt.dict); ret < 0) {
-    ilp_movie::LogAvError("Could not write header", ret);
+    log_utils_internal::LogAvError("Could not write header", ret);
     return exit_func(/*success=*/false);
   }
   if (!Empty(fmt_opt)) {
@@ -283,7 +286,7 @@ public:
     const auto entries = Entries(enc_opt);
     for (auto &&entry : entries) { oss << "('" << entry.first << "', '" << entry.second << "'), "; }
     oss << '\n';
-    ilp_movie::LogError(oss.str().c_str());
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, oss.str().c_str());
     return exit_func(/*success=*/false);
   }
 
@@ -311,7 +314,8 @@ public:
   inputs = avfilter_inout_alloc();
   outputs = avfilter_inout_alloc();
   if (!(inputs != nullptr && outputs != nullptr)) {
-    ilp_movie::LogAvError("Could not allocate filtergraph inputs/outputs", AVERROR(ENOMEM));
+    log_utils_internal::LogAvError(
+      "Could not allocate filtergraph inputs/outputs", AVERROR(ENOMEM));
     return exit_func(/*success=*/false);
   }
 
@@ -328,7 +332,7 @@ public:
   if (const int ret =
         avfilter_graph_parse_ptr(graph, filtergraph, &inputs, &outputs, /*log_ctx=*/nullptr);
       ret < 0) {
-    ilp_movie::LogAvError("Could not parse filtergraph", ret);
+    log_utils_internal::LogAvError("Could not parse filtergraph", ret);
     return exit_func(/*success=*/false);
   }
 
@@ -338,7 +342,7 @@ public:
   }
 
   if (const int ret = avfilter_graph_config(graph, /*log_ctx=*/nullptr); ret < 0) {
-    ilp_movie::LogError("Could not configure filtergraph\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Could not configure filtergraph\n");
     return exit_func(/*success=*/false);
   }
 
@@ -375,7 +379,7 @@ public:
         /*opaque=*/nullptr,
         graph);
       ret < 0) {
-    ilp_movie::LogAvError("Could not create buffer source", ret);
+    log_utils_internal::LogAvError("Could not create buffer source", ret);
     return false;
   }
 
@@ -387,7 +391,7 @@ public:
         /*opaque=*/nullptr,
         graph);
       ret < 0) {
-    ilp_movie::LogError("Could not create buffer sink\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Could not create buffer sink\n");
     return false;
   }
   if (const int ret = av_opt_set_bin(filt_out,
@@ -396,7 +400,7 @@ public:
         sizeof(enc_ctx->pix_fmt),
         AV_OPT_SEARCH_CHILDREN);// NOLINT
       ret < 0) {
-    ilp_movie::LogAvError("Could not set buffer sink pixel format", ret);
+    log_utils_internal::LogAvError("Could not set buffer sink pixel format", ret);
     return false;
   }
 
@@ -416,7 +420,7 @@ public:
   // Encode filtered frame.
   av_packet_unref(enc_pkt);
   if (const int ret = avcodec_send_frame(enc_ctx, enc_frame); ret < 0) {
-    ilp_movie::LogAvError("Could not send frame to encoder", ret);
+    log_utils_internal::LogAvError("Could not send frame to encoder", ret);
     return false;
   }
 
@@ -452,7 +456,7 @@ public:
   // NOTE(tohi): Resets the frame!
   // if (const int ret = av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, /*flags=*/0)) {
   if (const int ret = av_buffersrc_add_frame(buffersrc_ctx, dec_frame)) {
-    ilp_movie::LogAvError("Could not push frame to filter graph", ret);
+    log_utils_internal::LogAvError("Could not push frame to filter graph", ret);
     return false;
   }
 
@@ -555,7 +559,7 @@ WriteFrame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st, AVFrame *f
 
 namespace ilp_movie {
 
-auto MuxInit(MuxContext *const mux_ctx) -> bool
+auto MuxInit(MuxContext *const mux_ctx) noexcept -> bool
 {
   // Helper function to make sure we always tear down allocated resources
   // before exiting as a result of failure.
@@ -567,15 +571,15 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
   };
 
   if (mux_ctx == nullptr) {
-    LogError("Bad mux context\n");
+    LogMsg(LogLevel::kError, "Bad mux context\n");
     return exit_func(/*success=*/false, mux_ctx);
   }
   if (mux_ctx->impl != nullptr) {
-    LogError("Found stale mux implementation\n");
+    LogMsg(LogLevel::kError, "Found stale mux implementation\n");
     return exit_func(/*success=*/false, mux_ctx);
   }
   if (mux_ctx->filename == nullptr) {
-    LogError("Bad filename\n");
+    LogMsg(LogLevel::kError, "Bad filename\n");
     return exit_func(/*success=*/false, mux_ctx);
   }
 
@@ -595,7 +599,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
         mux_ctx->height,
         [&](AVDictionary **enc_opt) {
           if (impl->enc_ctx == nullptr) {
-            LogError("Encoding context not initialized\n");
+            LogMsg(LogLevel::kError, "Encoding context not initialized\n");
             return false;
           }
 
@@ -603,7 +607,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
           if (color_range < 0) {
             std::stringstream oss;
             oss << "Could not set color range '" << mux_ctx->color_range << "'";
-            LogAvError(oss.str().c_str(), color_range);
+            log_utils_internal::LogAvError(oss.str().c_str(), color_range);
             return false;
           }
           impl->enc_ctx->color_range = static_cast<AVColorRange>(color_range);
@@ -612,7 +616,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
           if (colorspace < 0) {
             std::stringstream oss;
             oss << "Could not set colorspace '" << mux_ctx->colorspace << "'";
-            LogAvError(oss.str().c_str(), colorspace);
+            log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
             return false;
           }
           impl->enc_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
@@ -621,7 +625,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
           if (color_primaries < 0) {
             std::stringstream oss;
             oss << "Could not set color primaries '" << mux_ctx->color_primaries << "'\n";
-            LogAvError(oss.str().c_str(), color_primaries);
+            log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
           }
           impl->enc_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
 
@@ -629,14 +633,14 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
           if (color_trc < 0) {
             std::stringstream oss;
             oss << "Could not set color transfer characteristics '" << mux_ctx->color_trc << "'\n";
-            LogAvError(oss.str().c_str(), color_trc);
+            log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
           }
           impl->enc_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
 
           if (impl->enc_ctx->codec_id == AV_CODEC_ID_H264) {
             const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->h264.pix_fmt);
             if (pix_fmt == AV_PIX_FMT_NONE) {
-              LogError("Could not find pixel format\n");
+              LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
@@ -648,7 +652,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             av_dict_set(enc_opt, "x264-params", mux_ctx->h264.x264_params, /*flags=*/0);
 
             if (!(0 <= mux_ctx->h264.crf && mux_ctx->h264.crf <= 51)) {
-              LogError("Could not set CRF\n");
+              LogMsg(LogLevel::kError, "Could not set CRF\n");
               return false;
             }
             av_dict_set_int(enc_opt, "crf", mux_ctx->h264.crf, /*flags=*/0);
@@ -659,18 +663,19 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
               av_dict_set(enc_opt, "tune", mux_ctx->h264.tune, /*flags=*/0);
             }
           } else if (impl->enc_ctx->codec_id == AV_CODEC_ID_PRORES) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->pro_res.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->pro_res.profile.pix_fmt);
             if (pix_fmt == AV_PIX_FMT_NONE) {
-              LogError("Could not find pixel format\n");
+              LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            if (!SetQScale(impl->enc_ctx, mux_ctx->pro_res.qscale)) {
-              LogError("Could not set qscale\n");
+            if (!SetQScale(impl->enc_ctx, mux_ctx->pro_res.profile.qscale)) {
+              LogMsg(LogLevel::kError, "Could not set qscale\n");
               return false;
             }
 
+#if 0
             // clang-format off
             assert(mux_ctx->pro_res.profile != nullptr); // NOLINT
             int64_t p = -1;
@@ -681,15 +686,16 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
             else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
             else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
             else {
-              LogError("Could not configure ProRes profile\n");
+              LogMsg(LogLevel::kError, "Could not configure ProRes profile\n");
               return false;   
             }
-            av_dict_set_int(enc_opt, "profile", p, /*flags=*/0);
             // clang-format on
+#endif
+            av_dict_set_int(enc_opt, "profile", static_cast<int64_t>(mux_ctx->pro_res.profile.index), /*flags=*/0);
 
-            av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.vendor, /*flags=*/0);
+            av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.profile.vendor, /*flags=*/0);
           } else {
-            LogError("Could not configure unsupported encoder\n");
+            LogMsg(LogLevel::kError, "Could not configure unsupported encoder\n");
             return false;
           }
 
@@ -700,7 +706,7 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
 
   impl->graph = avfilter_graph_alloc();
   if (impl->graph == nullptr) {
-    LogAvError("Could not allocate graph", AVERROR(ENOMEM));
+    log_utils_internal::LogAvError("Could not allocate graph", AVERROR(ENOMEM));
     return exit_func(/*success=*/false, mux_ctx);
   }
   if (!ConfigureVideoFilters(impl->graph,
@@ -715,10 +721,10 @@ auto MuxInit(MuxContext *const mux_ctx) -> bool
   return exit_func(/*success=*/true, mux_ctx);
 }
 
-auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
+auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcept -> bool
 {
   if (mux_ctx.impl == nullptr) {
-    LogError("Bad mux context\n");
+    LogMsg(LogLevel::kError, "Bad mux context\n");
     return false;
   }
   MuxImpl *impl = mux_ctx.impl;
@@ -730,7 +736,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
         mux_frame.r != nullptr &&
         mux_frame.g != nullptr &&
         mux_frame.b != nullptr)) {
-    LogError("Bad frame data input\n");
+    LogMsg(LogLevel::kError, "Bad frame data input\n");
     return false;
   }
   // clang-format on
@@ -739,7 +745,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
   // Create a frame and fill in the pixel data from the given mux frame.
   AVFrame *dec_frame = av_frame_alloc();
   if (dec_frame == nullptr) {
-    LogError("Could not allocate decode frame\n");
+    LogMsg(LogLevel::kError, "Could not allocate decode frame\n");
     return false;
   }
   dec_frame->format = AV_PIX_FMT_GBRPF32;
@@ -747,7 +753,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
   dec_frame->height = mux_frame.height;
   dec_frame->pts = static_cast<int64_t>(mux_frame.frame_nb);
   if (const int ret = av_frame_get_buffer(dec_frame, /*align=*/0); ret < 0) {
-    LogAvError("Could not allocate decode frame buffer", ret);
+    log_utils_internal::LogAvError("Could not allocate decode frame buffer", ret);
     return false;
   }
 
@@ -766,16 +772,16 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) -> bool
     dec_frame);
 }
 
-auto MuxFinish(const MuxContext &mux_ctx) -> bool
+auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
 {
   if (mux_ctx.impl == nullptr) {
-    LogError("Bad mux context\n");
+    LogMsg(LogLevel::kError, "Bad mux context\n");
     return false;
   }
   MuxImpl *impl = mux_ctx.impl;
 
   // Flush filter.
-  LogInfo("Flushing filter\n");
+  LogMsg(LogLevel::kInfo, "Flushing filter\n");
   if (!FilterEncodeWriteFrame(impl->ofmt_ctx,
         impl->enc_ctx,
         impl->enc_pkt,
@@ -783,36 +789,37 @@ auto MuxFinish(const MuxContext &mux_ctx) -> bool
         impl->buffersrc_ctx,
         impl->buffersink_ctx,
         /*dec_frame=*/nullptr)) {
-    LogError("Could not flush filter\n");
+    LogMsg(LogLevel::kError, "Could not flush filter\n");
     return false;
   }
 
   // Flush encoder.
   if (impl->enc_ctx->codec->capabilities & AV_CODEC_CAP_DELAY) {// NOLINT
-    LogInfo("Flushing stream encoder\n");
+    LogMsg(LogLevel::kInfo, "Flushing stream encoder\n");
     if (!EncodeWriteFrame(impl->ofmt_ctx, impl->enc_ctx, impl->enc_pkt, /*enc_frame=*/nullptr)) {
-      LogError("Could not flush stream encoder\n");
+      LogMsg(LogLevel::kError, "Could not flush stream encoder\n");
       return false;
     }
   }
 
   if (const int ret = av_write_trailer(impl->ofmt_ctx); ret < 0) {
-    LogError("Could not write trailer\n");
+    LogMsg(LogLevel::kError, "Could not write trailer\n");
     return false;
   }
 
   // Close the output file, if any.
   if (!(impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
     if (const int ret = avio_closep(&impl->ofmt_ctx->pb); ret < 0) {
-      LogAvError("Could not close file", ret);
+      log_utils_internal::LogAvError("Could not close file", ret);
       return false;
     }
   }
+  LogMsg(LogLevel::kInfo, "Closed file\n");
 
   return true;
 }
 
-void MuxFree(MuxContext *const mux_ctx)
+void MuxFree(MuxContext *const mux_ctx) noexcept
 {
   if (mux_ctx == nullptr || mux_ctx->impl == nullptr) {
     // Nothing to free!

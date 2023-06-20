@@ -1,9 +1,11 @@
 include(GenerateExportHeader)
 
 add_library(ilp_movie SHARED
-  demux.cpp
-  mux.cpp
-  log.cpp)
+  "demux.cpp"
+  "mux.cpp"
+  "log.cpp"
+  "internal/filter_graph.cpp"
+  "internal/log_utils.cpp")
 add_library(ilp_movie::ilp_movie ALIAS ilp_movie)
 target_link_libraries(ilp_movie 
   PRIVATE 
@@ -18,7 +20,8 @@ target_include_directories(ilp_movie
     "${CMAKE_BINARY_DIR}/configured_files/include")
 target_include_directories(ilp_movie
   PRIVATE
-    "${CMAKE_BINARY_DIR}/configured_files/include")
+    "${CMAKE_BINARY_DIR}/configured_files/include"
+    ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(ilp_movie 
   PUBLIC cxx_std_17)
 set_target_properties(ilp_movie

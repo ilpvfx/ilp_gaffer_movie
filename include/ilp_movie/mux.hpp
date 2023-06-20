@@ -1,13 +1,3 @@
-#pragma once
-
-#include <functional>// std::function
-
-#include <ilp_movie/ilp_movie_export.hpp>
-
-namespace ilp_movie {
-
-struct MuxImpl;
-
 // Example:
 // {
 //   // Create and configure mux context.
@@ -47,6 +37,70 @@ struct MuxImpl;
 //   MuxFree(&mux_ctx.impl);
 //   return true;
 // }
+
+#pragma once
+
+#include <functional>// std::function
+
+#include <ilp_movie/ilp_movie_export.hpp>
+
+namespace ilp_movie {
+
+namespace ProRes {
+
+  struct Profile
+  {
+    // clang-format off
+    // 4:2:2 profiles.
+    [[nodiscard]] static constexpr auto proxy() noexcept -> Profile    
+    { return { "proxy",    0, "yuv422p10le" }; }
+
+    [[nodiscard]] static constexpr auto lt() noexcept -> Profile       
+    { return { "lt",       1, "yuv422p10le" }; }
+
+    [[nodiscard]] static constexpr auto standard() noexcept -> Profile 
+    { return { "standard", 2, "yuv422p10le" }; }
+    
+    [[nodiscard]] static constexpr auto hq() noexcept -> Profile       
+    { return { "hq",       3, "yuv422p10le" }; }
+
+    // 4:4:4 profiles (optional alpha).
+    [[nodiscard]] static constexpr auto _4444() noexcept -> Profile    
+    { return { "4444",     4, "yuv444p10le" }; }
+
+    // NOTE: Not tested!
+    [[nodiscard]] static constexpr auto _4444_alpha() noexcept -> Profile    
+    { return { "4444",     4, "yuva444p10le" }; }
+
+    [[nodiscard]] static constexpr auto _4444xq() noexcept -> Profile  
+    { return { "4444xq",   5, "yuv444p10le" }; }
+
+    // NOTE: Not tested!
+    [[nodiscard]] static constexpr auto _4444xq_alpha() noexcept -> Profile  
+    { return { "4444xq",   5, "yuva444p10le" }; }
+    // clang-format on
+
+    // The basic difference is the bitrates...
+    const char *name = nullptr;
+    int index = -1;
+
+    // Supported pixel formats (depending on profile).
+    // NOTE: We are only considering 10-bit pixel formats for now.
+    const char *pix_fmt = nullptr;
+
+    // Values between 9 - 13 give a good results.
+    // Lower value gives higher quality, but larger file size.
+    int qscale = 11;
+
+    // Tricks QuickTime and Final Cut Pro into thinking that the movie was generated using a
+    // QuickTime ProRes encoder.
+    const char *vendor = "apl0";
+  };
+
+}// namespace ProRes
+
+struct MuxImpl;
+
 //
 struct MuxContext
 {
@@ -78,27 +132,7 @@ struct MuxContext
 
   struct
   {
-    // The basic difference is the bitrates... TODO: expand!
-    // 0 - proxy
-    // 1 - lt
-    // 2 - standard
-    // 3 - hq
-    // 4 - 4444
-    // 5 - 4444xq
-    const char *profile = "hq";
-
-    // Supported pixel formats (depending on profile)
-    //   "yuv422p10le"
-    //   "yuv444p10le"
-    //   "yuva444p10le" (with alpha)
-    const char *pix_fmt = "yuv422p10le";
-
-    // Values between 9 - 13 give a good results.
-    int qscale = 11;
-
-    // Tricks QuickTime and Final Cut Pro into thinking that the movie was generated using a
-    // QuickTime ProRes encoder.
-    const char *vendor = "apl0";
+    ProRes::Profile profile = ProRes::Profile::hq();
   } pro_res = {};
 
   // Docs: https://trac.ffmpeg.org/wiki/Encode/H.264
@@ -224,7 +258,7 @@ struct MuxFrame
 //
 // If false is returned, the internal resources could not be allocated. The mux context will be
 // unusable. There is no need to call MuxFree{} in this case.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MuxInit(MuxContext *mux_ctx) -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxInit(MuxContext *mux_ctx) noexcept -> bool;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.
@@ -234,14 +268,14 @@ struct MuxFrame
 //
 // Note that the frame's width/height must match the corresponding values on the MuxContext since
 // we currently don't support pixel scaling.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &frame)
-  -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx,
+  const MuxFrame &frame) noexcept -> bool;
 
 // Finalize the file by flushing streams and possibly performing other operations.
 //
 // Returns true if successful, otherwise false.
 // Note that the MuxContext must be manually free'd using MuxFreeImpl{} regardless of success.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MuxFinish(const MuxContext &mux_ctx) -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool;
 
 // Free the resources allocated by the implementation in MuxInit{}. The implementation pointer will
 // be set to null.
@@ -250,6 +284,6 @@ struct MuxFrame
 //
 // Note: Only MuxContext instances that have been passed to a successful MuxInit{} call need to free
 // their implementations.
-ILP_MOVIE_EXPORT void MuxFree(MuxContext *mux_ctx);
+ILP_MOVIE_EXPORT void MuxFree(MuxContext *mux_ctx) noexcept;
 
 }// namespace ilp_movie

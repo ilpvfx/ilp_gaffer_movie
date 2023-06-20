@@ -1,6 +1,9 @@
 #include <ilp_movie/demux.hpp>
 
 #include <cassert>// assert
+#include <cerrno>// ENOMEM, etc
+#include <cstring>// std::memcpy
+#include <vector>// std::vector
 
 // clang-format off
 extern "C" {
@@ -21,34 +24,22 @@ extern "C" {
 // clang-format on
 
 #include <ilp_movie/log.hpp>
+#include <internal/filter_graph.hpp>
+#include <internal/log_utils.hpp>
 
 [[nodiscard]] static auto OpenInputFile(const char *const filename,
   AVFormatContext **ifmt_ctx,
   AVCodecContext **dec_ctx,
-  AVPacket **dec_pkt,
-  AVFrame **dec_frame,
-  int *video_stream_index) -> bool
+  int *video_stream_index) noexcept -> bool
 {
-  *dec_pkt = av_packet_alloc();
-  if (*dec_pkt == nullptr) {
-    ilp_movie::LogAvError("Cannot not allocate packet");
-    return false;
-  }
-
-  *dec_frame = av_frame_alloc();
-  if (*dec_frame == nullptr) {
-    ilp_movie::LogAvError("Cannot allocate frame");
-    return false;
-  }
-
   if (const int ret = avformat_open_input(ifmt_ctx, filename, /*fmt=*/nullptr, /*options=*/nullptr);
       ret < 0) {
-    ilp_movie::LogAvError("Cannot open input file", ret);
+    log_utils_internal::LogAvError("Cannot open input file", ret);
     return false;
   }
 
   if (const int ret = avformat_find_stream_info(*ifmt_ctx, /*options=*/nullptr); ret < 0) {
-    ilp_movie::LogAvError("Cannot find stream information", ret);
+    log_utils_internal::LogAvError("Cannot find stream information", ret);
     return false;
   }
 
@@ -61,14 +52,15 @@ extern "C" {
     &dec,
     /*flags=*/0);
   if (*video_stream_index < 0) {
-    ilp_movie::LogAvError("Cannot find a video stream in the input file", *video_stream_index);
+    log_utils_internal::LogAvError(
+      "Cannot find a video stream in the input file", *video_stream_index);
     return false;
   }
 
   // Create decoding context.
   *dec_ctx = avcodec_alloc_context3(dec);
   if (*dec_ctx == nullptr) {
-    ilp_movie::LogAvError("Cannot allocate context", AVERROR(ENOMEM));
+    log_utils_internal::LogAvError("Cannot allocate context", AVERROR(ENOMEM));
     return false;
   }
 
@@ -76,18 +68,132 @@ extern "C" {
   if (const int ret = avcodec_parameters_to_context(
         *dec_ctx, (*ifmt_ctx)->streams[*video_stream_index]->codecpar);// NOLINT
       ret < 0) {
-    ilp_movie::LogAvError("Could not copy decoder parameters to the output stream", ret);
+    log_utils_internal::LogAvError("Could not copy decoder parameters to the output stream", ret);
     return false;
   }
 
   // Init the video decoder.
   if (const int ret = avcodec_open2(*dec_ctx, dec, /*options=*/nullptr); ret < 0) {
-    ilp_movie::LogAvError("Cannot open video decoder", ret);
+    log_utils_internal::LogAvError("Cannot open video decoder", ret);
     return false;
   }
 
   return true;
 }
+
+[[nodiscard]] auto ReadFrame(AVFormatContext *ifmt_ctx,
+  AVCodecContext *dec_ctx,
+  AVFilterContext *buffersrc_ctx,
+  AVFilterContext *buffersink_ctx,
+  AVPacket *pkt,
+  AVFrame *dec_frame,
+  AVFrame *filt_frame,
+  const int video_stream_index,
+  ilp_movie::DemuxFrame *demux_frame) noexcept -> bool
+{
+  bool got_frame = false;
+  int ret = 0;
+  while (!got_frame && ret >= 0) {
+    // Read a packet from the file.
+    if (ret = av_read_frame(ifmt_ctx, pkt); ret < 0) {
+      ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot read packet\n");
+      break;
+    }
+
+    if (pkt->stream_index == video_stream_index) {
+      // Send the packet to the decoder.
+      if (ret = avcodec_send_packet(dec_ctx, pkt); ret < 0) {
+        log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
+        break;
+      }
+
+      while (ret >= 0) {
+        ret = avcodec_receive_frame(dec_ctx, dec_frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
+          // AVERROR(EAGAIN): Output is not available in this state.
+          // AVERROR_EOF: Decoder fully flushed, there will be no more output frames.
+          break;
+        } else if (ret < 0) {
+          log_utils_internal::LogAvError("Cannot receive frame from the decoder", ret);
+          goto end;
+        }
+
+        dec_frame->pts = dec_frame->best_effort_timestamp;
+
+        // Push the decoded frame into the filter graph.
+        if (ret =
+              av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
+            ret < 0) {
+          log_utils_internal::LogAvError("Cannot push decoded frame to the filter graph", ret);
+          goto end;
+        }
+
+        // Pull filtered frames from the filter graph.
+        for (;;) {
+          ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
+          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) { break; }// NOLINT
+          if (ret < 0) { goto end; }
+
+          //
+          // ProcessFrame(frame)
+          // ...
+          //
+          if (filt_frame->format == AV_PIX_FMT_GBRPF32) {
+            auto frame_size = static_cast<size_t>(filt_frame->width);
+            frame_size *= static_cast<size_t>(filt_frame->height);
+            demux_frame->width = filt_frame->width;
+            demux_frame->height = filt_frame->height;
+            demux_frame->r.resize(frame_size);
+            demux_frame->g.resize(frame_size);
+            demux_frame->b.resize(frame_size);
+            const size_t byte_count = frame_size * sizeof(float);
+            std::memcpy(/*__dest=*/demux_frame->g.data(), /*__src=*/dec_frame->data[0], byte_count);
+            std::memcpy(/*__dest=*/demux_frame->b.data(), /*__src=*/dec_frame->data[1], byte_count);
+            std::memcpy(/*__dest=*/demux_frame->r.data(), /*__src=*/dec_frame->data[2], byte_count);
+          }
+          // else: unrecognized pixel format!
+
+          // display_frame(filt_frame, buffersink_ctx->inputs[0]->time_base);
+          av_frame_unref(filt_frame);
+          got_frame = true;
+        }
+        av_frame_unref(dec_frame);
+      }
+
+      // Wipe the packet.
+      av_packet_unref(pkt);
+    }
+    // else: packet is from a stream that we are not interested in (maybe audio?).
+  }
+
+end:
+  if (ret < 0 && ret != AVERROR_EOF) {// NOLINT
+    log_utils_internal::LogAvError("Cannot read frame", ret);
+    return false;
+  }
+
+  return true;
+}
+
+namespace {
+
+struct SeekEntry
+{
+  int display_index;
+  int64_t first_packet_dts;
+  int64_t last_packet_dts;
+};
+
+struct SeekTable
+{
+  std::vector<SeekEntry> entries;
+  bool completed = false;
+  int num_frames = -1;// total number of frames
+  int num_entries = 0;// number of seek-points (keyframes)
+  // int allocated_size;
+};
+
+}// namespace
 
 namespace ilp_movie {
 
@@ -97,10 +203,17 @@ struct DemuxImpl
   AVCodecContext *dec_ctx = nullptr;
   AVPacket *dec_pkt = nullptr;
   AVFrame *dec_frame = nullptr;
+  AVFrame *filt_frame = nullptr;
   int video_stream_index = -1;
+
+  AVFilterContext *buffersink_ctx = nullptr;
+  AVFilterContext *buffersrc_ctx = nullptr;
+  AVFilterGraph *filter_graph = nullptr;
+
+  SeekTable seek_table = {};
 };
 
-auto DemuxInit(DemuxContext *const demux_ctx) noexcept -> bool
+auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept -> bool
 {
   // Helper function to make sure we always tear down allocated resources
   // before exiting as a result of failure.
@@ -111,41 +224,62 @@ auto DemuxInit(DemuxContext *const demux_ctx) noexcept -> bool
     return success;
   };
 
-  try {
+  if (demux_ctx == nullptr) {
+    LogMsg(LogLevel::kError, "Bad demux context");
+    return exit_func(/*success=*/false, demux_ctx);
+  }
+  if (demux_ctx->impl != nullptr) {
+    LogMsg(LogLevel::kError, "Found stale demux implementation");
+    return exit_func(/*success=*/false, demux_ctx);
+  }
+  if (demux_ctx->filename == nullptr) {
+    LogMsg(LogLevel::kError, "Bad filename");
+    return exit_func(/*success=*/false, demux_ctx);
+  }
 
-    if (demux_ctx == nullptr) {
-      LogError("Bad demux context");
-      return exit_func(/*success=*/false, demux_ctx);
-    }
-    if (demux_ctx->impl != nullptr) {
-      LogError("Found stale demux implementation");
-      return exit_func(/*success=*/false, demux_ctx);
-    }
-    if (demux_ctx->filename == nullptr) {
-      LogError("Bad filename");
-      return exit_func(/*success=*/false, demux_ctx);
-    }
+  // Allocate the implementation specific data.
+  // MUST be manually free'd at some later point.
+  demux_ctx->impl = new DemuxImpl;// NOLINT
+  DemuxImpl *impl = demux_ctx->impl;
 
-    // Allocate the implementation specific data.
-    // MUST be manually free'd at some later point.
-    demux_ctx->impl = new DemuxImpl;// NOLINT
-    DemuxImpl *impl = demux_ctx->impl;
+  impl->dec_pkt = av_packet_alloc();
+  impl->dec_frame = av_frame_alloc();
+  impl->filt_frame = av_frame_alloc();
+  if (!(impl->dec_pkt != nullptr && impl->dec_frame != nullptr && impl->filt_frame != nullptr)) {
+    LogMsg(LogLevel::kError, "Cannot allocate frames/packets\n");
+    return exit_func(/*success=*/false, demux_ctx);
+  }
 
-    if (!OpenInputFile(demux_ctx->filename,
-          &impl->ifmt_ctx,
-          &impl->dec_ctx,
-          &impl->dec_pkt,
-          &impl->dec_frame,
-          &impl->video_stream_index)) {
-      return exit_func(/*success=*/false, demux_ctx);
-    }
-    assert(impl->video_stream_index >= 0);// NOLINT
+  if (!OpenInputFile(
+        demux_ctx->filename, &(impl->ifmt_ctx), &(impl->dec_ctx), &(impl->video_stream_index))) {
+    return exit_func(/*success=*/false, demux_ctx);
+  }
+  assert(impl->video_stream_index >= 0);// NOLINT
 
-    av_dump_format(impl->ifmt_ctx, impl->video_stream_index, demux_ctx->filename, /*is_output=*/0);
+  av_dump_format(impl->ifmt_ctx, impl->video_stream_index, demux_ctx->filename, /*is_output=*/0);
 
+  // "scale=w=0:h=0:out_color_matrix=bt709"
+  filter_graph_internal::FilterGraphArgs fg_args = {};
+  fg_args.codec_ctx = impl->dec_ctx;
+  fg_args.filter_graph = "null";
+  fg_args.sws_flags = "";
+  fg_args.in.pix_fmt = impl->dec_ctx->pix_fmt;
+  fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
+  fg_args.out.pix_fmt = AV_PIX_FMT_GBRPF32;
+  if (!filter_graph_internal::ConfigureVideoFilters(
+        &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx), fg_args)) {
+    return exit_func(/*success=*/false, demux_ctx);
+  }
 
-  } catch (...) {
-    LogError("Unknown exception");
+  if (!ReadFrame(impl->ifmt_ctx,
+        impl->dec_ctx,
+        impl->buffersrc_ctx,
+        impl->buffersink_ctx,
+        impl->dec_pkt,
+        impl->dec_frame,
+        impl->filt_frame,
+        impl->video_stream_index,
+        first_frame)) {
     return exit_func(/*success=*/false, demux_ctx);
   }
 
@@ -177,19 +311,19 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
   if (const int ret =
         av_seek_frame(impl->ifmt_ctx, impl->video_stream_index, seek_target, kSeekFlags);
       ret < 0) {
-    LogAvError("Seek error", ret);
+    log_utils_internal::LogAvError("Seek error", ret);
     return false;
   }
 
   // while(...)
   {
     if (const int ret = av_read_frame(impl->ifmt_ctx, impl->dec_pkt); ret < 0) {
-      LogAvError("Cannot read frame", ret);
+      log_utils_internal::LogAvError("Cannot read frame", ret);
       return false;
     }
 
     if (const int ret = avcodec_send_packet(impl->dec_ctx, impl->dec_pkt); ret < 0) {
-      LogAvError("Error while sending a packet for decoding", ret);
+      log_utils_internal::LogAvError("Error while sending a packet for decoding", ret);
       return false;
     }
 
@@ -199,7 +333,7 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
         break;
       } else if (ret < 0) {
-        LogAvError("Error while receiving a frame from the decoder", ret);
+        log_utils_internal::LogAvError("Error while receiving a frame from the decoder", ret);
         return false;
       }
 
@@ -229,27 +363,19 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
 
 void DemuxFree(DemuxContext *demux_ctx) noexcept
 {
-  try {
-    if (demux_ctx == nullptr) {
-      // Nothing to free!
-      return;
-    }
-    DemuxImpl *impl = demux_ctx->impl;
-    if (impl == nullptr) {
-      // Nothing to free!
-      return;
-    }
+  if (demux_ctx == nullptr) { return; }// Nothing to free!
+  DemuxImpl *impl = demux_ctx->impl;
+  if (impl == nullptr) { return; }// Nothing to free!
 
-    avcodec_free_context(&impl->dec_ctx);
-    avformat_close_input(&impl->ifmt_ctx);
-    av_frame_free(&impl->dec_frame);
-    av_packet_free(&impl->dec_pkt);
+  avfilter_graph_free(&(impl->filter_graph));
+  avcodec_free_context(&(impl->dec_ctx));
+  avformat_close_input(&(impl->ifmt_ctx));
+  av_frame_free(&(impl->dec_frame));
+  av_frame_free(&(impl->filt_frame));
+  av_packet_free(&(impl->dec_pkt));
 
-    delete impl;// NOLINT
-    demux_ctx->impl = nullptr;
-  } catch (...) {
-    LogError("Unknown exception");
-  }
+  delete impl;// NOLINT
+  demux_ctx->impl = nullptr;
 }
 
 

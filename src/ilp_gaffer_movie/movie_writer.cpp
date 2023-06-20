@@ -9,8 +9,8 @@
 
 // #include <GafferImage/ImagePlug.h>
 
-#include <ilp_movie/mux.hpp>
 #include <ilp_movie/log.hpp>
+#include <ilp_movie/mux.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieWriter);
 
@@ -282,7 +282,11 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
       break;
     }
     // clang-format on
-    IECore::msg(iec_level, "MovieWriter", std::string{ s });
+
+    // Remove trailing newline character since the IECore logger will add one.
+    auto str = std::string{ s };
+    if (!str.empty() && str[str.length() - 1] == '\n') { str.erase(str.length() - 1); }
+    IECore::msg(iec_level, "MovieWriter", str);
   });
 
   bool mux_init = false;
@@ -318,16 +322,23 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     mux_ctx.h264.qp = codec_settings->getChild<IntPlug>("qp")->getValue();
     // clang-format on
   } else if (codec == "prores") {
-    const ProfilePixelFormat ppf =
-      GetProfilePixelFormat(codec, codec_settings->getChild<StringPlug>("profile")->getValue());
-    if (!(ppf.profile != nullptr && ppf.pix_fmt != nullptr)) {
-      throw IECore::Exception("Bad ProRes profile / pixel format");
-    }
+    const auto p_str = codec_settings->getChild<StringPlug>("profile")->getValue();
+
+    // clang-format off
+    ilp_movie::ProRes::Profile profile = {};
+    if      (p_str == "proxy_10b"    ) { profile = ilp_movie::ProRes::Profile::proxy();    }
+    else if (p_str == "lt_10b"       ) { profile = ilp_movie::ProRes::Profile::lt();       }
+    else if (p_str == "standard_10b" ) { profile = ilp_movie::ProRes::Profile::standard(); }
+    else if (p_str == "hq_10b"       ) { profile = ilp_movie::ProRes::Profile::hq();       }
+    else if (p_str == "4444_10b"     ) { profile = ilp_movie::ProRes::Profile::_4444();    }
+    else if (p_str == "4444xq_10b"   ) { profile = ilp_movie::ProRes::Profile::_4444xq();  }
+    else { throw IECore::Exception("Bad ProRes profile / pixel format"); }
+    // clang-format on
+
+    profile.qscale = codec_settings->getChild<IntPlug>("qscale")->getValue();
 
     mux_ctx.codec_name = "prores_ks";
-    mux_ctx.pro_res.profile = ppf.profile;
-    mux_ctx.pro_res.pix_fmt = ppf.pix_fmt;
-    mux_ctx.pro_res.qscale = codec_settings->getChild<IntPlug>("qscale")->getValue();
+    mux_ctx.pro_res.profile = profile;
   } else {
     throw IECore::Exception("Unsupported codec");
   }
@@ -350,6 +361,8 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
       if (!MuxInit(&mux_ctx)) { throw IECore::Exception("Mux init failed"); }
       mux_init = true;
     }
+
+    // TODO(tohi): Only send pixels in display window?
 
     // Pass a frame to the muxer.
     ilp_movie::MuxFrame mux_frame = {};
@@ -400,7 +413,7 @@ void MovieWriter::execute() const
 {
   // const std::vector<float> frames(1, Context::current()->getFrame());
   // executeSequence(frames);
-  executeSequence({Context::current()->getFrame()});
+  executeSequence({ Context::current()->getFrame() });
 }
 
 }// namespace IlpGafferMovie

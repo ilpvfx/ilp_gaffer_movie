@@ -91,7 +91,7 @@ TEST_CASE("H264")
   SECTION("default")
   {
     // Check that we have sane default values!
-    mux_ctx.filename = "mux_h264_default.mov";
+    mux_ctx.filename = "/tmp/mux_h264_default.mov";
 
     init_video(&mux_ctx);
     write_video(mux_ctx, /*frame_count=*/100);
@@ -100,7 +100,7 @@ TEST_CASE("H264")
 
   SECTION("profile")
   {
-    mux_ctx.filename = "mux_h264_high10.mov";
+    mux_ctx.filename = "/tmp/mux_h264_high10.mov";
     mux_ctx.h264.profile = "high10";
 
     init_video(&mux_ctx);
@@ -109,7 +109,7 @@ TEST_CASE("H264")
   }
   SECTION("bad profile")
   {
-    mux_ctx.filename = "mux_h264_high10.mov";
+    mux_ctx.filename = "/tmp/mux_h264_bad_profile.mov";
     mux_ctx.h264.profile = "__bad_profile";
 
     const bool ret = ilp_movie::MuxInit(&mux_ctx);
@@ -119,7 +119,7 @@ TEST_CASE("H264")
 
   SECTION("preset")
   {
-    mux_ctx.filename = "mux_h264_slower.mov";
+    mux_ctx.filename = "/tmp/mux_h264_slower.mov";
     mux_ctx.h264.preset = "slower";
 
     init_video(&mux_ctx);
@@ -128,7 +128,7 @@ TEST_CASE("H264")
   }
   SECTION("bad preset")
   {
-    mux_ctx.filename = "mux_h264_bad_preset.mov";
+    mux_ctx.filename = "/tmp/mux_h264_bad_preset.mov";
     mux_ctx.h264.preset = "__bad_preset";
 
     const bool ret = ilp_movie::MuxInit(&mux_ctx);
@@ -138,7 +138,7 @@ TEST_CASE("H264")
 
   SECTION("crf")
   {
-    mux_ctx.filename = "mux_h264_crf.mov";
+    mux_ctx.filename = "/tmp/mux_h264_crf.mov";
     mux_ctx.h264.crf = 27;
 
     init_video(&mux_ctx);
@@ -147,7 +147,7 @@ TEST_CASE("H264")
   }
   SECTION("bad crf (<0)")
   {
-    mux_ctx.filename = "mux_h264_bad_crf.mov";
+    mux_ctx.filename = "/tmp/mux_h264_bad_crf.mov";
     mux_ctx.h264.crf = -1;
 
     const bool r = ilp_movie::MuxInit(&mux_ctx);
@@ -166,7 +166,7 @@ TEST_CASE("H264")
 
   SECTION("tune")
   {
-    mux_ctx.filename = "mux_h264_tune.mov";
+    mux_ctx.filename = "/tmp/mux_h264_tune.mov";
     mux_ctx.h264.tune = "film";
 
     init_video(&mux_ctx);
@@ -175,7 +175,7 @@ TEST_CASE("H264")
   }
   SECTION("bad tune")
   {
-    mux_ctx.filename = "mux_h264_bad_tune.mov";
+    mux_ctx.filename = "/tmp/mux_h264_bad_tune.mov";
     mux_ctx.h264.tune = "__bad_tune";
 
     const bool r = ilp_movie::MuxInit(&mux_ctx);

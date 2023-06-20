@@ -44,26 +44,7 @@ void SetLogLevel(int level) noexcept;
 ILP_MOVIE_EXPORT
 void SetLogCallback(const std::function<void(int, const char *)> &cb) noexcept;
 
-// Functions below are for internal use.
-
-ILP_MOVIE_NO_EXPORT
+ILP_MOVIE_EXPORT
 void LogMsg(int level, const char *msg) noexcept;
-
-ILP_MOVIE_NO_EXPORT
-void LogInfo(const char *msg) noexcept;
-
-ILP_MOVIE_NO_EXPORT
-void LogError(const char *msg) noexcept;
-
-// NOTE: errnum is a libav error code (<0) returned by some function.
-// Example:
-//
-//   if (const int ret = avcodec_parameters_from_context(...); ret < 0) {
-//     ilp_movie::LogAvError("Encoder parameters error", ret);
-//     return false;
-//   }
-//
-ILP_MOVIE_NO_EXPORT
-void LogAvError(const char *msg, const int errnum = 0) noexcept;
 
 }// namespace ilp_movie
