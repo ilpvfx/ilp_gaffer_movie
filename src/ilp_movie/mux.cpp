@@ -28,6 +28,7 @@ extern "C" {
 // clang-format on
 
 #include <ilp_movie/log.hpp>
+#include <internal/dict_utils.hpp>
 #include <internal/log_utils.hpp>
 
 namespace ilp_movie {
@@ -55,58 +56,12 @@ struct MuxImpl
 #endif
 
   // const AVOutputFormat *out_format = nullptr;
-  // const AVCodec *video_codec = nullptr;
 };
 
 }// namespace ilp_movie
 
-namespace {
 
-// Simple RAII class for AVDictionary.
-// NOTE(tohi): Not thread-safe.
-class Options
-{
-public:
-  Options(const Options &) = default;
-  Options &operator=(const Options &) = default;
-  Options(Options &&) = default;
-  Options &operator=(Options &&) = default;
-  ~Options() noexcept
-  {
-    if (dict != nullptr) {
-      av_dict_free(&dict);
-      dict = nullptr;
-    }
-  }
-
-  AVDictionary *dict = nullptr;
-};
-
-}// namespace
-
-[[nodiscard]] static auto Count(const Options &opt) noexcept -> int
-{
-  return opt.dict != nullptr ? av_dict_count(opt.dict) : 0;
-}
-
-[[nodiscard]] static auto Empty(const Options &opt) noexcept -> bool { return !(Count(opt) > 0); }
-
-[[nodiscard]] static auto Entries(const Options &opt)
-  -> std::vector<std::pair<std::string, std::string>>
-{
-  if (opt.dict == nullptr) { return {}; }
-
-  // Iterate over all entries.
-  std::vector<std::pair<std::string, std::string>> res = {};
-  const AVDictionaryEntry *e = nullptr;
-  // NOLINTNEXTLINE
-  while ((e = av_dict_get(opt.dict, "", e, AV_DICT_IGNORE_SUFFIX))) {
-    res.emplace_back(std::make_pair(std::string{ e->key }, std::string{ e->value }));
-  }
-  return res;
-}
-
-[[nodiscard]] static auto SetQScale(AVCodecContext *enc_ctx, const int qscale) -> bool
+[[nodiscard]] static auto SetQScale(AVCodecContext *enc_ctx, const int qscale) noexcept -> bool
 {
   if (!(enc_ctx != nullptr && qscale >= 0)) { return false; }
 
@@ -126,7 +81,7 @@ public:
   const double fps,
   const int width,
   const int height,
-  const std::function<bool(AVDictionary **)> &config_enc) -> bool
+  const std::function<bool(AVDictionary **)> &config_enc) noexcept -> bool
 {
   const auto exit_func = [&](const bool success) {
     if (!success) {
@@ -216,7 +171,7 @@ public:
   }
 
   // Codec-specific settings on encoding context.
-  Options enc_opt = {};
+  dict_utils_internal::Options enc_opt = {};
   if (!config_enc(&enc_opt.dict)) { return exit_func(/*success=*/false); }
   {
     std::ostringstream oss;
@@ -275,7 +230,7 @@ public:
   }
 
   // Write the output file header.
-  Options fmt_opt = {};
+  dict_utils_internal::Options fmt_opt = {};
   if (const int ret = avformat_write_header(*ofmt_ctx, &fmt_opt.dict); ret < 0) {
     log_utils_internal::LogAvError("Could not write header", ret);
     return exit_func(/*success=*/false);
@@ -415,7 +370,7 @@ public:
 [[nodiscard]] static auto EncodeWriteFrame(AVFormatContext *ofmt_ctx,
   AVCodecContext *enc_ctx,
   AVPacket *enc_pkt,
-  const AVFrame *enc_frame) -> bool
+  const AVFrame *enc_frame) noexcept -> bool
 {
   // Encode filtered frame.
   av_packet_unref(enc_pkt);
@@ -450,7 +405,7 @@ public:
   AVFrame *enc_frame,
   AVFilterContext *buffersrc_ctx,
   AVFilterContext *buffersink_ctx,
-  AVFrame *dec_frame) -> bool
+  AVFrame *dec_frame) noexcept -> bool
 {
   // Push the decoded frame into the filter graph.
   // NOTE(tohi): Resets the frame!
@@ -486,7 +441,7 @@ public:
 }
 
 #if 0
-static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) {
+static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) noexcept {
 #if 0
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
     printf("pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
@@ -498,62 +453,6 @@ static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) {
   (void)fmt_ctx;
   (void)pkt;
 #endif
-}
-#endif
-
-#if 0
-// Encode one video frame and send it to the muxer.
-//
-// Returns WriteStatus::kEncodingFinished when encoding is finished, WriteStatus::kEncodingOngoing
-// otherwise.
-//
-// Return WriteStatus::kEncodingError if an error occured, in which case muxing should be aborted.
-[[nodiscard]] static auto
-WriteFrame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt)
-    -> IlpGafferMovieWriter::WriteStatus {
-  char errbuf[AV_ERROR_MAX_STRING_SIZE];
-  std::ostringstream oss;
-
-  // Send the frame to the encoder.
-  if (const int ret = avcodec_send_frame(c, frame); ret < 0) {
-    av_strerror(/*errnum=*/ret, errbuf, AV_ERROR_MAX_STRING_SIZE);
-    oss << "[mux] Error sending a frame to the encoder: " << errbuf << "\n";
-    MuxLog(oss.str().c_str());
-    return IlpGafferMovieWriter::WriteStatus::kEncodingError;
-  }
-
-  int ret = 0;
-  while (ret >= 0) {
-    ret = avcodec_receive_packet(c, pkt);
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-      break;
-    } else if (ret < 0) {
-      av_strerror(/*errnum=*/ret, errbuf, AV_ERROR_MAX_STRING_SIZE);
-      oss << "[mux] Error encoding a frame: " << errbuf << "\n";
-      MuxLog(oss.str().c_str());
-      return IlpGafferMovieWriter::WriteStatus::kEncodingError;
-    }
-
-    // Rescale output packet timestamp values from codec to stream timebase.
-    av_packet_rescale_ts(pkt, c->time_base, st->time_base);
-    pkt->stream_index = st->index;
-
-    // Write the compressed frame to the media file.
-    LogPacket(fmt_ctx, pkt);
-    ret = av_interleaved_write_frame(fmt_ctx, pkt);
-    // pkt is now blank (av_interleaved_write_frame() takes ownership of
-    // its contents and resets pkt), so that no unreferencing is necessary.
-    // This would be different if one used av_write_frame().
-    if (ret < 0) {
-      av_strerror(/*errnum=*/ret, errbuf, AV_ERROR_MAX_STRING_SIZE);
-      oss << "[mux] Error while writing output packet: " << errbuf << "\n";
-      MuxLog(oss.str().c_str());
-      return IlpGafferMovieWriter::WriteStatus::kEncodingError;
-    }
-  }
-
-  return ret == AVERROR_EOF ? IlpGafferMovieWriter::WriteStatus::kEncodingFinished
-                            : IlpGafferMovieWriter::WriteStatus::kEncodingOngoing;
 }
 #endif
 
@@ -603,97 +502,78 @@ auto MuxInit(MuxContext *const mux_ctx) noexcept -> bool
             return false;
           }
 
-          const int color_range = av_color_range_from_name(mux_ctx->color_range);
+          const int color_range = av_color_range_from_name(mux_ctx->mp4_metadata.color_range);
           if (color_range < 0) {
             std::stringstream oss;
-            oss << "Could not set color range '" << mux_ctx->color_range << "'";
+            oss << "Could not set color range '" << mux_ctx->mp4_metadata.color_range << "'";
             log_utils_internal::LogAvError(oss.str().c_str(), color_range);
             return false;
           }
           impl->enc_ctx->color_range = static_cast<AVColorRange>(color_range);
 
-          const int colorspace = av_color_space_from_name(mux_ctx->colorspace);
+          const int colorspace = av_color_space_from_name(mux_ctx->mp4_metadata.colorspace);
           if (colorspace < 0) {
             std::stringstream oss;
-            oss << "Could not set colorspace '" << mux_ctx->colorspace << "'";
+            oss << "Could not set colorspace '" << mux_ctx->mp4_metadata.colorspace << "'";
             log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
             return false;
           }
           impl->enc_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
 
-          const int color_primaries = av_color_primaries_from_name(mux_ctx->color_primaries);
+          const int color_primaries =
+            av_color_primaries_from_name(mux_ctx->mp4_metadata.color_primaries);
           if (color_primaries < 0) {
             std::stringstream oss;
-            oss << "Could not set color primaries '" << mux_ctx->color_primaries << "'\n";
+            oss << "Could not set color primaries '" << mux_ctx->mp4_metadata.color_primaries
+                << "'\n";
             log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
           }
           impl->enc_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
 
-          const int color_trc = av_color_transfer_from_name(mux_ctx->color_trc);
+          const int color_trc = av_color_transfer_from_name(mux_ctx->mp4_metadata.color_trc);
           if (color_trc < 0) {
             std::stringstream oss;
-            oss << "Could not set color transfer characteristics '" << mux_ctx->color_trc << "'\n";
+            oss << "Could not set color transfer characteristics '"
+                << mux_ctx->mp4_metadata.color_trc << "'\n";
             log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
           }
           impl->enc_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
 
           if (impl->enc_ctx->codec_id == AV_CODEC_ID_H264) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->h264.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->h264.cfg.pix_fmt);
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            assert(mux_ctx->h264.profile != nullptr);// NOLINT
-            assert(mux_ctx->h264.preset != nullptr);// NOLINT
-            av_dict_set(enc_opt, "profile", mux_ctx->h264.profile, /*flags=*/0);
-            av_dict_set(enc_opt, "preset", mux_ctx->h264.preset, /*flags=*/0);
-            av_dict_set(enc_opt, "x264-params", mux_ctx->h264.x264_params, /*flags=*/0);
-
-            if (!(0 <= mux_ctx->h264.crf && mux_ctx->h264.crf <= 51)) {
-              LogMsg(LogLevel::kError, "Could not set CRF\n");
+            if (!(0 <= mux_ctx->h264.cfg.crf && mux_ctx->h264.cfg.crf <= 51)) {
+              LogMsg(LogLevel::kError, "Bad CRF\n");
               return false;
             }
-            av_dict_set_int(enc_opt, "crf", mux_ctx->h264.crf, /*flags=*/0);
 
-            if (mux_ctx->h264.qp >= 0) { av_dict_set_int(enc_opt, "qp", 0, /*flags=*/0); }
-
-            if (mux_ctx->h264.tune != nullptr) {
-              av_dict_set(enc_opt, "tune", mux_ctx->h264.tune, /*flags=*/0);
+            av_dict_set(enc_opt, "preset", mux_ctx->h264.cfg.preset, /*flags=*/0);
+            av_dict_set_int(enc_opt, "crf", mux_ctx->h264.cfg.crf, /*flags=*/0);
+            av_dict_set(enc_opt, "x264-params", mux_ctx->h264.cfg.x264_params, /*flags=*/0);
+            if (mux_ctx->h264.cfg.tune != nullptr) {
+              av_dict_set(enc_opt, "tune", mux_ctx->h264.cfg.tune, /*flags=*/0);
             }
           } else if (impl->enc_ctx->codec_id == AV_CODEC_ID_PRORES) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->pro_res.profile.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->pro_res.cfg.pix_fmt);
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             impl->enc_ctx->pix_fmt = pix_fmt;
 
-            if (!SetQScale(impl->enc_ctx, mux_ctx->pro_res.profile.qscale)) {
+            if (!SetQScale(impl->enc_ctx, mux_ctx->pro_res.cfg.qscale)) {
               LogMsg(LogLevel::kError, "Could not set qscale\n");
               return false;
             }
 
-#if 0
-            // clang-format off
-            assert(mux_ctx->pro_res.profile != nullptr); // NOLINT
-            int64_t p = -1;
-            if      (std::strcmp(mux_ctx->pro_res.profile, "proxy") == 0)    { p = 0; }
-            else if (std::strcmp(mux_ctx->pro_res.profile, "lt") == 0)       { p = 1; }
-            else if (std::strcmp(mux_ctx->pro_res.profile, "standard") == 0) { p = 2; }
-            else if (std::strcmp(mux_ctx->pro_res.profile, "hq") == 0)       { p = 3; }
-            else if (std::strcmp(mux_ctx->pro_res.profile, "4444") == 0)     { p = 4; }
-            else if (std::strcmp(mux_ctx->pro_res.profile, "4444xq") == 0)   { p = 5; }
-            else {
-              LogMsg(LogLevel::kError, "Could not configure ProRes profile\n");
-              return false;   
-            }
-            // clang-format on
-#endif
-            av_dict_set_int(enc_opt, "profile", static_cast<int64_t>(mux_ctx->pro_res.profile.index), /*flags=*/0);
-
-            av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.profile.vendor, /*flags=*/0);
+            av_dict_set_int(
+              enc_opt, "profile", static_cast<int64_t>(mux_ctx->pro_res.cfg.profile), /*flags=*/0);
+            av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.cfg.vendor, /*flags=*/0);
           } else {
             LogMsg(LogLevel::kError, "Could not configure unsupported encoder\n");
             return false;
@@ -845,39 +725,3 @@ void MuxFree(MuxContext *const mux_ctx) noexcept
 }
 
 }// namespace ilp_movie
-
-#if 0
-  // Create a new scaling context to match the tmp frame and out frame
-  // pixel formats and pixel dimensions.
-  impl->sws_ctx = sws_getContext(/*srcW=*/impl->tmp_frame->width,
-                                 /*srcH=*/impl->tmp_frame->height,
-                                 /*srcFormat=*/(AVPixelFormat)impl->tmp_frame->format,
-                                 /*dstW=*/impl->frame->width,
-                                 /*dstH=*/impl->frame->height,
-                                 /*dstFormat=*/(AVPixelFormat)impl->frame->format,
-                                 /*flags=*/SWS_BICUBIC,
-                                 /*srcFilter=*/nullptr,
-                                 /*dstFilter=*/nullptr,
-                                 /*param=*/nullptr);
-  if (impl->sws_ctx == nullptr) {
-    MuxLog("[mux] Could not initialize the frame conversion context\n");
-    return false;
-  }
-#endif
-
-#if 0
-  // AVCodecID codec_id = ;
-  {
-    std::ostringstream oss;
-    oss << "Codecs:\n";
-    oss << avcodec_get_name(AV_CODEC_ID_PRORES) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_H264) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_MJPEG) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_MJPEGB) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_MSMPEG4V3) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_JPEG2000) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_PNG) << "\n";
-    oss << avcodec_get_name(AV_CODEC_ID_WRAPPED_AVFRAME) << "\n";
-    MuxLog(oss.str().c_str());
-  }
-#endif

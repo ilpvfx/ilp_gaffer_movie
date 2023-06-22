@@ -4,6 +4,7 @@ add_library(ilp_movie SHARED
   "demux.cpp"
   "mux.cpp"
   "log.cpp"
+  "internal/dict_utils.cpp"
   "internal/filter_graph.cpp"
   "internal/log_utils.cpp")
 add_library(ilp_movie::ilp_movie ALIAS ilp_movie)
