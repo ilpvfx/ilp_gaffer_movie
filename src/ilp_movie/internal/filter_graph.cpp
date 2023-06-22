@@ -15,10 +15,11 @@ extern "C" {
 
 namespace filter_graph_internal {
 
-auto ConfigureVideoFilters(AVFilterGraph **filter_graph,
+auto ConfigureVideoFilters(const FilterGraphArgs &args,
+  AVFilterGraph **filter_graph,
   AVFilterContext **buffersrc_ctx,
-  AVFilterContext **buffersink_ctx,
-  const FilterGraphArgs &args) noexcept -> bool
+  AVFilterContext **buffersink_ctx
+  ) noexcept -> bool
 {
   AVFilterGraph *graph = nullptr;
   AVFilterInOut *inputs = nullptr;
@@ -132,7 +133,7 @@ auto ConfigureVideoFilters(AVFilterGraph **filter_graph,
   graph->scale_sws_opts = av_strdup(args.sws_flags.c_str());
 
   if (!(filter_graph != nullptr && buffersink_ctx != nullptr && buffersink_ctx != nullptr)) {
-    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot set filter graph parameters\n");
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot return filter graph\n");
     return exit_func(/*success=*/false);
   }
 

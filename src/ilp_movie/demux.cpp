@@ -25,6 +25,7 @@ extern "C" {
 // clang-format on
 
 #include <ilp_movie/log.hpp>
+#include <internal/dict_utils.hpp>
 #include <internal/filter_graph.hpp>
 #include <internal/log_utils.hpp>
 
@@ -33,51 +34,70 @@ extern "C" {
   AVCodecContext **dec_ctx,
   int *video_stream_index) noexcept -> bool
 {
-  if (const int ret = avformat_open_input(ifmt_ctx, filename, /*fmt=*/nullptr, /*options=*/nullptr);
+  AVFormatContext *fmt_ctx = nullptr;
+  if (const int ret = avformat_open_input(&fmt_ctx, filename, /*fmt=*/nullptr, /*options=*/nullptr);
       ret < 0) {
     log_utils_internal::LogAvError("Cannot open input file", ret);
     return false;
   }
 
-  if (const int ret = avformat_find_stream_info(*ifmt_ctx, /*options=*/nullptr); ret < 0) {
+  if (const int ret = avformat_find_stream_info(fmt_ctx, /*options=*/nullptr); ret < 0) {
     log_utils_internal::LogAvError("Cannot find stream information", ret);
     return false;
   }
 
+#if 0
+  {
+    AVDictionary *metadata = nullptr;
+    av_dict_copy(&metadata, fmt_ctx->metadata, /*flags=*/0);
+    std::ostringstream oss;
+    oss << "Metadata: ";
+    dict_utils_internal::Options opt = {};
+    opt.dict = metadata;
+    const auto entries = dict_utils_internal::Entries(opt);
+    for (auto &&entry : entries) { oss << "(" << entry.first << " = " << entry.second << "), "; }
+    oss << "\n";
+    ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
+  }
+#endif
+
   // Select the video stream.
   const AVCodec *dec = nullptr;
-  *video_stream_index = av_find_best_stream(*ifmt_ctx,
+  const int stream_index = av_find_best_stream(fmt_ctx,
     AVMEDIA_TYPE_VIDEO,
     /*wanted_stream_nb=*/-1,
     /*related_stream=*/-1,
     &dec,
     /*flags=*/0);
-  if (*video_stream_index < 0) {
-    log_utils_internal::LogAvError(
-      "Cannot find a video stream in the input file", *video_stream_index);
+  if (stream_index < 0) {
+    log_utils_internal::LogAvError("Cannot find a video stream in the input file", stream_index);
     return false;
   }
 
   // Create decoding context.
-  *dec_ctx = avcodec_alloc_context3(dec);
-  if (*dec_ctx == nullptr) {
-    log_utils_internal::LogAvError("Cannot allocate context", AVERROR(ENOMEM));
+  AVCodecContext *codec_ctx = avcodec_alloc_context3(dec);
+  if (codec_ctx == nullptr) {
+    log_utils_internal::LogAvError("Cannot allocate codec context", AVERROR(ENOMEM));
     return false;
   }
 
   // Copy decoder parameters to the input stream.
-  if (const int ret = avcodec_parameters_to_context(
-        *dec_ctx, (*ifmt_ctx)->streams[*video_stream_index]->codecpar);// NOLINT
+  if (const int ret =
+        avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[stream_index]->codecpar);// NOLINT
       ret < 0) {
-    log_utils_internal::LogAvError("Could not copy decoder parameters to the output stream", ret);
+    log_utils_internal::LogAvError("Could not copy decoder parameters to the input stream", ret);
     return false;
   }
 
   // Init the video decoder.
-  if (const int ret = avcodec_open2(*dec_ctx, dec, /*options=*/nullptr); ret < 0) {
+  if (const int ret = avcodec_open2(codec_ctx, dec, /*options=*/nullptr); ret < 0) {
     log_utils_internal::LogAvError("Cannot open video decoder", ret);
     return false;
   }
+
+  *ifmt_ctx = fmt_ctx;
+  *dec_ctx = codec_ctx;
+  *video_stream_index = stream_index;
 
   return true;
 }
@@ -130,15 +150,13 @@ extern "C" {
         }
 
         // Pull filtered frames from the filter graph.
-        //while (!got_frame) {
+        // while (!got_frame) {
         while (ret >= 0) {
           ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
           if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
             break;
           }
-          if (ret < 0) { 
-            goto end; 
-          }
+          if (ret < 0) { goto end; }
 
           std::ostringstream oss;
           oss << "frame->pts = " << filt_frame->pts << "\n";
@@ -161,7 +179,7 @@ extern "C" {
             std::memcpy(/*__dest=*/demux_frame->b.data(), /*__src=*/dec_frame->data[1], byte_count);
             std::memcpy(/*__dest=*/demux_frame->r.data(), /*__src=*/dec_frame->data[2], byte_count);
 
-            //got_frame = true;
+            // got_frame = true;
             goto end;
           }
           // else: unrecognized pixel format!
@@ -254,6 +272,7 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
   demux_ctx->impl = new DemuxImpl;// NOLINT
   DemuxImpl *impl = demux_ctx->impl;
 
+  // Allocate packets and frames.
   impl->dec_pkt = av_packet_alloc();
   impl->dec_frame = av_frame_alloc();
   impl->filt_frame = av_frame_alloc();
@@ -279,10 +298,12 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
   fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
   fg_args.out.pix_fmt = AV_PIX_FMT_GBRPF32;
   if (!filter_graph_internal::ConfigureVideoFilters(
-        &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx), fg_args)) {
+        fg_args, &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
     return exit_func(/*success=*/false, demux_ctx);
   }
 
+  (void)first_frame;
+#if 0
   if (!ReadFrame(impl->ifmt_ctx,
         impl->dec_ctx,
         impl->buffersrc_ctx,
@@ -294,6 +315,7 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
         first_frame)) {
     return exit_func(/*success=*/false, demux_ctx);
   }
+#endif
 
   return exit_func(/*success=*/true, demux_ctx);
 }

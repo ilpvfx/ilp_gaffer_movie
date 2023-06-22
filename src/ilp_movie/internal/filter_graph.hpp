@@ -36,16 +36,15 @@ struct FilterGraphArgs
 #endif
   } in;
 
-
   struct
   {
     AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
   } out;
 };
 
-[[nodiscard]] ILP_MOVIE_NO_EXPORT auto ConfigureVideoFilters(AVFilterGraph **graph,
+[[nodiscard]] ILP_MOVIE_NO_EXPORT auto ConfigureVideoFilters(const FilterGraphArgs &args,
+  AVFilterGraph **graph,
   AVFilterContext **buffersrc_ctx,
-  AVFilterContext **buffersink_ctx,
-  const FilterGraphArgs& args) noexcept -> bool;
+  AVFilterContext **buffersink_ctx) noexcept -> bool;
 
 }// namespace filter_graph_internal
