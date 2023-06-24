@@ -243,7 +243,7 @@ struct DemuxImpl
   SeekTable seek_table = {};
 };
 
-auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept -> bool
+auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noexcept -> bool
 {
   // Helper function to make sure we always tear down allocated resources
   // before exiting as a result of failure.
@@ -302,7 +302,6 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
     return exit_func(/*success=*/false, demux_ctx);
   }
 
-  (void)first_frame;
 #if 0
   if (!ReadFrame(impl->ifmt_ctx,
         impl->dec_ctx,
@@ -320,6 +319,7 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
   return exit_func(/*success=*/true, demux_ctx);
 }
 
+#if 0
 [[nodiscard]] static int64_t FrameToPts(AVStream *st, const int frame)
 {
   // NOTE(tohi): Assuming that the stream has constant frame rate!
@@ -328,14 +328,49 @@ auto DemuxInit(DemuxContext *const demux_ctx, DemuxFrame *first_frame) noexcept 
   return (static_cast<int64_t>(frame) * frame_rate.den * st->time_base.den)
          / (static_cast<int64_t>(frame_rate.num) * st->time_base.num);
 }
+#endif
 
-auto DemuxSeek(const DemuxContext &demux_ctx,
-  const int frame_pos,
-  DemuxFrame *const /*frame*/) noexcept -> bool
+auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *const frame) noexcept
+  -> bool
 {
   const auto *impl = demux_ctx.impl;
   if (impl == nullptr) { return false; }
 
+  // TMP!!
+  const auto cx = 0.5F * static_cast<float>(impl->dec_ctx->width) + static_cast<float>(frame_pos);
+  const auto cy = 0.5F * static_cast<float>(impl->dec_ctx->height);
+  constexpr auto kR = 100.F;// in pixels
+
+  frame->width = impl->dec_ctx->width;
+  frame->height = impl->dec_ctx->height;
+  frame->r.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
+  frame->g.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
+  frame->b.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
+  for (int y = 0; y < frame->height; ++y) {
+    for (int x = 0; x < frame->width; ++x) {
+      const auto i =
+        static_cast<size_t>(y) * static_cast<size_t>(frame->width) + static_cast<size_t>(x);
+      const auto xx = static_cast<float>(x);
+      const auto yy = static_cast<float>(y);
+      const float d = std::sqrt((xx - cx) * (xx - cx) + (yy - cy) * (yy - cy)) - kR;
+      if (d < 0) {
+        frame->b[i] = std::abs(d);
+        frame->b[i] /=
+          static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                       + impl->dec_ctx->height * impl->dec_ctx->height));
+      } else {
+        frame->r[i] = d;
+        frame->r[i] /=
+          static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                       + impl->dec_ctx->height * impl->dec_ctx->height));
+      }
+      frame->g[i] = 0.F;
+    }
+  }
+
+  return true;
+
+#if 0
   const int64_t seek_target =
     FrameToPts(impl->ifmt_ctx->streams[impl->video_stream_index], frame_pos);// NOLINT
   // seek_target = av_rescale_q(
@@ -392,6 +427,7 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
 
 
   return true;
+#endif
 }
 
 

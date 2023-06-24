@@ -427,8 +427,8 @@ TEST_CASE("test")
   const auto init_demux = [&](ilp_movie::DemuxContext *demux_ctx) {
     REQUIRE(demux_ctx->impl == nullptr);
     {
-      ilp_movie::DemuxFrame first_frame = {};
-      const bool ret = ilp_movie::DemuxInit(demux_ctx, &first_frame);
+      //ilp_movie::DemuxFrame first_frame = {};
+      const bool ret = ilp_movie::DemuxInit(demux_ctx/*, &first_frame*/);
       DumpLogLinesIf(&log_lines, !ret);
       REQUIRE(ret);
     }

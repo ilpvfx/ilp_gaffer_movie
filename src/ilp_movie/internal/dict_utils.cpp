@@ -37,5 +37,4 @@ auto Entries(const Options &opt) noexcept -> std::vector<std::pair<std::string, 
   return res;
 }
 
-
 }// namespace dict_utils_internal

@@ -29,8 +29,8 @@ struct DemuxFrame
   std::vector<float> b;
 };
 
-[[nodiscard]] ILP_MOVIE_EXPORT auto DemuxInit(DemuxContext *demux_ctx,
-  DemuxFrame *first_frame) noexcept -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto DemuxInit(DemuxContext *demux_ctx/*,
+  DemuxFrame *first_frame*/) noexcept -> bool;
 
 [[nodiscard]] ILP_MOVIE_EXPORT auto
   DemuxSeek(const DemuxContext &demux_ctx, int frame_pos, DemuxFrame *frame) noexcept -> bool;

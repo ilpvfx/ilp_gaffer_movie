@@ -1,18 +1,25 @@
 #include <ilp_gaffer_movie/av_reader.hpp>
 
+// The nested TaskMutex needs to be the first to include tbb
+#include <internal/LRUCache.h>
+
+#include <memory>
 #include <string>
 
 // HACK(tohi): Disable TBB deprecation warning.
 #define __TBB_show_deprecation_message_task_scheduler_init_H
 
-#include "GafferImage/FormatPlug.h"
-#include "GafferImage/ImageAlgo.h"
-#include "GafferImage/ImageReader.h"
+#include <GafferImage/FormatPlug.h>
+#include <GafferImage/ImageAlgo.h>
+#include <GafferImage/ImageReader.h>
 
-#include "Gaffer/Context.h"
-#include "Gaffer/StringPlug.h"
+#include <Gaffer/Context.h>
+#include <Gaffer/StringPlug.h>
 
-#include "boost/bind/bind.hpp"
+#include <boost/bind/bind.hpp>
+
+#include <ilp_movie/demux.hpp>
+#include <ilp_movie/log.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::AvReader);
 
@@ -20,11 +27,139 @@ static const IECore::InternedString kTileBatchIndexContextName("__tileBatchIndex
 
 namespace {
 
-class File
+class Frame
 {
+public:
+  explicit Frame(std::unique_ptr<ilp_movie::DemuxFrame> frame) : _frame(std::move(frame)) {}
+
+#if 0
+  // Read a chunk of data from the file, formatted as a tile batch that will be stored on the tile
+  // batch plug
+  IECore::ConstObjectVectorPtr readTileBatch(const Gaffer::Context *c, Imath::V3i tileBatchIndex) {}
+
+  int readRegion(int subImage,
+    const Box2i &targetRegion,
+    std::vector<float> &data,
+    DeepData &deepData,
+    Box2i &exrDataRegion);
+
+
+private:
+#endif
+  std::unique_ptr<ilp_movie::DemuxFrame> _frame;
 };
 
+// For success, frame should be set, and error left null.
+// For failure, frame should be left null, and error should be set.
+struct CacheEntry
+{
+  std::shared_ptr<Frame> frame;
+  std::shared_ptr<std::string> error;
+};
 
+#if 0
+struct CacheKey {
+  std::string filename = "";
+  int frame = -1;
+  ilp_movie::DemuxContext *demux_ctx = nullptr;
+}
+#endif
+
+CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
+  size_t &cost,
+  const IECore::Canceller * /*canceller*/)
+{
+  IECore::msg(IECore::Msg::Info, "AvReader", "FrameCacheGetter");
+
+  cost = 1;
+
+  CacheEntry result = {};
+
+  ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
+  ilp_movie::SetLogCallback([](int level, const char *s) {
+    auto iec_level = IECore::MessageHandler::Level::Invalid;
+    // clang-format off
+    switch (level) {
+    case ilp_movie::LogLevel::kPanic:
+    case ilp_movie::LogLevel::kFatal:
+    case ilp_movie::LogLevel::kError:
+      iec_level = IECore::MessageHandler::Level::Error; break;
+    case ilp_movie::LogLevel::kWarning:
+      iec_level = IECore::MessageHandler::Level::Warning; break;
+    case ilp_movie::LogLevel::kInfo:
+    case ilp_movie::LogLevel::kVerbose:
+    case ilp_movie::LogLevel::kDebug:
+    case ilp_movie::LogLevel::kTrace:
+      iec_level = IECore::MessageHandler::Level::Info; break;
+    case ilp_movie::LogLevel::kQuiet: // ???
+    default: 
+      break;
+    }
+    // clang-format on
+
+    // Remove trailing newline character since the IECore logger will add one.
+    auto str = std::string{ s };
+    if (!str.empty() && str[str.length() - 1] == '\n') { str.erase(str.length() - 1); }
+    IECore::msg(iec_level, "MovieReader", str);
+  });
+
+  ilp_movie::DemuxContext demux_ctx = {};
+  demux_ctx.filename = key.first.c_str();
+  if (!ilp_movie::DemuxInit(&demux_ctx)) {
+    result.error.reset(new std::string("AvReader : Cannot initialize demuxer"));// NOLINT
+    // No need to free the demux context when init fails.
+    return result;
+  }
+
+  ilp_movie::DemuxFrame demux_frame = {};
+  if (!ilp_movie::DemuxSeek(demux_ctx, key.second, &demux_frame)) {
+    ilp_movie::DemuxFree(&demux_ctx);
+    result.error.reset(new std::string("AvReader : Cannot seek to frame"));// NOLINT
+    return result;
+  }
+
+  ilp_movie::DemuxFree(&demux_ctx);
+
+  auto demux_frame_ptr = std::make_unique<ilp_movie::DemuxFrame>();
+  demux_frame_ptr->width = demux_frame.width;
+  demux_frame_ptr->height = demux_frame.height;
+  demux_frame_ptr->frame_index = demux_frame.frame_index;
+  demux_frame_ptr->r = std::move(demux_frame.r);
+  demux_frame_ptr->g = std::move(demux_frame.g);
+  demux_frame_ptr->b = std::move(demux_frame.b);
+
+  result.frame.reset(new Frame(std::move(demux_frame_ptr)));// NOLINT
+  return result;
+
+#if 0
+  const std::string &fileName = fileNameAndFrame.first;
+
+  std::unique_ptr<ImageInput> imageInput(ImageInput::create(fileName));
+  if (!imageInput) {
+    result.error.reset(
+      new std::string("OpenImageIOReader : Could not create ImageInput : " + OIIO::geterror()));
+    return result;
+  }
+
+  ImageSpec firstPartSpec;
+  if (!imageInput->open(fileName, firstPartSpec)) {
+    result.error.reset(
+      new std::string("OpenImageIOReader : Could not open ImageInput : " + imageInput->geterror()));
+    return result;
+  }
+
+  result.file.reset(
+    new File(std::move(imageInput), fileName, fileNameAndChannelInterpretation.second));
+#endif
+}
+
+using FrameCache = IECorePreview::LRUCache<std::pair<std::string, int>, CacheEntry>;
+
+FrameCache *GetFrameCache()
+{
+  static auto *c = new FrameCache(FrameCacheGetter, 200);
+  return c;
+}
 
 }// namespace
 
@@ -154,6 +289,7 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
   IECore::MurmurHash &h) const
 {
   GafferImage::ImageNode::hash(output, context, h);
+  h.append(context->getFrame());
 
   if (output == availableFramesPlug()) {
     fileNamePlug()->hash(h);
@@ -201,25 +337,27 @@ void AvReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context
     int j = 3;
     for (auto &&i : result) { i = j++; }
 #endif
-  } else if (output == _tileBatchPlug()) {
+  }
+#if 0
+  else if (output == _tileBatchPlug()) {
     IECore::msg(IECore::Msg::Info, "AvReader", "compute - tileBatch");
     // const auto tileBatchIndex = context->get<Imath::V3i>(kTileBatchIndexContextName);
 
     Gaffer::Context::EditableScope c(context);
     c.remove(kTileBatchIndexContextName);
 
-#if 0
-    FilePtr file = std::static_pointer_cast<File>(retrieveFile(c.context()));
-
-    if (!file) {
+    std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFile(c.context()));
+    if (frame == nullptr) {
       throw IECore::Exception(
         "OpenImageIOReader - trying to evaluate _tileBatchPlug() with invalid file, this should "
         "never happen.");
     }
 
-    static_cast<ObjectVectorPlug *>(output)->setValue(file->readTileBatch(context, tileBatchIndex));
+    static_cast<Gaffer::ObjectVectorPlug *>(output)->setValue(
+      frame->readTileBatch(context, tileBatchIndex));
+  }
 #endif
-  } else {
+  else {
     IECore::msg(IECore::Msg::Info, "AvReader", "compute - <other>");
     ImageNode::compute(output, context);
   }
@@ -275,30 +413,18 @@ void AvReader::hashFormat(const GafferImage::ImagePlug *parent,
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
 
-GafferImage::Format AvReader::computeFormat(const Gaffer::Context * /*context*/,
+GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  // if (!file) { return FormatPlug::getDefaultFormat(context); }
+  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  if (frame == nullptr) { return GafferImage::FormatPlug::getDefaultFormat(context); }
 
   return GafferImage::Format(
     /*displayWindow=*/Imath::Box2i(
       /*minT=*/Imath::V2i(0, 0),
-      /*maxT=*/Imath::V2i(479, 318)),
+      /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height)),
     /*pixelAspect=*/1.0,
     /*fromEXRSpace=*/false);
-
-#if 0
-  // when we're in MissingFrameMode::Black we still want to
-  // match the format of the Hold frame, so pass true for holdForBlack.
-  FilePtr file = std::static_pointer_cast<File>(retrieveFile(context, true));
-  if (!file) { return FormatPlug::getDefaultFormat(context); }
-
-  const ImageSpec &spec = file->imageSpec(context);
-  return GafferImage::Format(
-    Imath::Box2i(Imath::V2i(spec.full_x, spec.full_y),
-      Imath::V2i(spec.full_x + spec.full_width, spec.full_y + spec.full_height)),
-    spec.get_float_attribute("PixelAspectRatio", 1.0f));
-#endif
 }
 
 
@@ -315,19 +441,15 @@ void AvReader::hashDataWindow(const GafferImage::ImagePlug *parent,
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
 
-Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context * /*context*/,
-  const GafferImage::ImagePlug * /*parent*/) const
+Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context *context,
+  const GafferImage::ImagePlug *parent) const
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeDataWindow");
 
-  // if (file == nullptr) {
-  //   return parent->dataWindowPlug()->defaultValue();
-  // }
-  const int x = 0;
-  const int y = 0;
-  const int width = 512;
-  const int height = 512;
-  return Imath::Box2i(/*minT=*/Imath::V2i(x, y), /*maxT=*/Imath::V2i(width + x, height + y));
+  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  if (frame == nullptr) { return parent->dataWindowPlug()->defaultValue(); }
+  return Imath::Box2i(
+    /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height));
 }
 
 void AvReader::hashMetadata(const GafferImage::ImagePlug *parent,
@@ -421,7 +543,7 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
 }
 
 IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Context * /*context*/,
-  const GafferImage::ImagePlug */*parent*/) const
+  const GafferImage::ImagePlug * /*parent*/) const
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeChannelNames");
 
@@ -463,7 +585,7 @@ void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
 IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &channelName,
   const Imath::V2i &tileOrigin,
   const Gaffer::Context *context,
-  const GafferImage::ImagePlug * /*parent*/) const
+  const GafferImage::ImagePlug *parent) const
 {
   IECore::msg(IECore::Msg::Info,
     "AvReader",
@@ -471,7 +593,11 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
       % tileOrigin.x % tileOrigin.y);
 
   GafferImage::ImagePlug::GlobalScope c(context);
-  // if (!file) { return parent->channelDataPlug()->defaultValue(); }
+  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+
+  if (frame == nullptr) { return parent->channelDataPlug()->defaultValue(); }
+  IECore::msg(
+    IECore::Msg::Info, "AvReader", boost::format("computeChannelData - channelName = got frame"));
 
   const Imath::Box2i dataWindow = outPlug()->dataWindowPlug()->getValue();
   const Imath::Box2i tileBound(
@@ -485,27 +611,122 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
                  % dataWindow.min.x % dataWindow.min.y % dataWindow.max.x % dataWindow.max.y));
   }
 
-  IECore::FloatVectorDataPtr channelData = new IECore::FloatVectorData;
-  auto &channel = channelData->writable();
-  const auto tile_size = static_cast<std::size_t>(GafferImage::ImagePlug::tileSize());
+  // c.set(kTileBatchIndexContextName, &tileBatchIndex);
+
+  // ConstObjectVectorPtr tileBatch = tileBatchPlug()->getValue();
+  IECore::FloatVectorDataPtr tileData = new IECore::FloatVectorData(
+    std::vector<float>(static_cast<size_t>(GafferImage::ImagePlug::tilePixels())));
+  auto &tile = tileData->writable();
+
+  const auto *f = frame->_frame.get();
+  const std::vector<float> *ch = nullptr;
   if (channelName == GafferImage::ImageAlgo::channelNameR) {
-    channel.resize(tile_size * tile_size, 1.0F);
-  } else {
-    channel.resize(tile_size * tile_size, 0.0F);
+    ch = &(f->r);
+  } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
+    ch = &(f->g);
+  } else {// channelName == GafferImage::ImageAlgo::channelNameB
+    ch = &(f->b);
   }
 
-  return channelData;
+  const Imath::Box2i tileRegion = GafferImage::BufferAlgo::intersection(tileBound, dataWindow);
+
+  for (int y = tileRegion.min.y; y < tileRegion.max.y; ++y) {
+    float *dst = &tile[static_cast<size_t>(y - tileRegion.min.y)
+                       * static_cast<size_t>(GafferImage::ImagePlug::tileSize())];
+    const float *src = &(*ch)[static_cast<size_t>(y) * static_cast<size_t>(f->width)
+                              + static_cast<size_t>(tileRegion.min.x)];
+    std::memcpy(
+      dst, src, sizeof(float) * (static_cast<size_t>(tileRegion.max.x - tileRegion.min.x)));
+  }
+
+
+  // if (channelName == GafferImage::ImageAlgo::channelNameR) {
+  //   channel.resize(tile_size * tile_size, 1.0F);
+  // } else {
+  //   channel.resize(tile_size * tile_size, 0.0F);
+  // }
+
+  return tileData;
   // return parent->channelDataPlug()->defaultValue();
   //  ...
+}
+
+std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
+  bool holdForBlack = false*/) const
+{
+  IECore::msg(IECore::Msg::Info,
+    "AvReader",
+    boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str());
+
+
+  const std::string fileName = fileNamePlug()->getValue();
+  if (fileName.empty()) { return nullptr; }
+
+#if 0
+  MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
+  if (holdForBlack && mode == Black) {
+    // For some outputs, like "format", we need to hold the value of an adjacent frame when we're
+    // going to return black pixels
+    mode = Hold;
+  }
+  ImageReader::ChannelInterpretation channelNaming =
+    (ImageReader::ChannelInterpretation)channelInterpretationPlug()->getValue();
+
+  const std::string resolvedFileName = context->substitute(fileName);
+#endif
+
+  const auto key = std::make_pair(fileName, static_cast<int>(context->getFrame()));
+  auto *cache = GetFrameCache();
+  CacheEntry cacheEntry = cache->get(key);
+#if 0
+  if (!cacheEntry.frame) {
+    if (mode == OpenImageIOReader::Black) {
+      // we can simply return nullptr and rely on the
+      // compute methods to return default plug values.
+      return nullptr;
+    } else if (mode == OpenImageIOReader::Hold) {
+      ConstIntVectorDataPtr frameData = availableFramesPlug()->getValue();
+      const std::vector<int> &frames = frameData->readable();
+      if (frames.size()) {
+        std::vector<int>::const_iterator fIt =
+          std::lower_bound(frames.begin(), frames.end(), (int)context->getFrame());
+
+        // decrement to get the previous frame, unless
+        // this is the first frame, in which case we
+        // hold to the beginning of the sequence
+        if (fIt != frames.begin()) { fIt--; }
+
+        // setup a context with the new frame
+        Context::EditableScope holdScope(context);
+        holdScope.setFrame(*fIt);
+
+        const std::string resolvedFileNameHeld = holdScope.context()->substitute(fileName);
+        cacheEntry = cache->get(std::make_pair(resolvedFileNameHeld, channelNaming));
+      }
+
+      // if we got here, there was no suitable file sequence, or we weren't able to open the held
+      // frame
+      if (!cacheEntry.file) { throw IECore::Exception(*(cacheEntry.error)); }
+    } else {
+      throw IECore::Exception(*(cacheEntry.error));
+    }
+  }
+#endif
+
+  IECore::msg(IECore::Msg::Info, "AvReader", "_retrieveFrame: return frame");
+
+  return cacheEntry.frame;
 }
 
 
 void AvReader::_plugSet(Gaffer::Plug *plug)
 {
-  // This clears the cache every time the refresh count is updated, so you don't get entries
-  // from old files hanging around.
+  // This clears the cache every time the refresh
+  // count is updated, so you don't get entries from
+  // old files hanging around.
   if (plug == refreshCountPlug()) {
     // fileCache()->clear();
+    GetFrameCache()->clear();
   }
 }
 

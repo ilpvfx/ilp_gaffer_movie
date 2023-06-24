@@ -108,6 +108,8 @@ private:
   Gaffer::ObjectVectorPlug *_tileBatchPlug();
   const Gaffer::ObjectVectorPlug *_tileBatchPlug() const;
 
+  std::shared_ptr<void> _retrieveFrame(const Gaffer::Context *context/*, bool holdForBlack = false*/) const;
+
   void _plugSet(Gaffer::Plug *plug);
 
   static std::size_t FirstPlugIndex;

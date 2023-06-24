@@ -213,7 +213,7 @@ struct MuxImpl
   // Encode filtered frame.
   av_packet_unref(enc_pkt);
   if (const int ret = avcodec_send_frame(enc_ctx, enc_frame); ret < 0) {
-    log_utils_internal::LogAvError("Could not send frame to encoder", ret);
+    log_utils_internal::LogAvError("Cannot send frame to encoder", ret);
     return false;
   }
 

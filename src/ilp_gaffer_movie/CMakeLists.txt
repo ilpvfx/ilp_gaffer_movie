@@ -15,7 +15,8 @@ target_include_directories(IlpGafferMovie ${WARNING_GUARD}
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>)
 target_include_directories(IlpGafferMovie 
   PRIVATE 
-    "${CMAKE_BINARY_DIR}/configured_files/include")
+    "${CMAKE_BINARY_DIR}/configured_files/include"
+    ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(IlpGafferMovie 
   PUBLIC cxx_std_17)
 set_target_properties(IlpGafferMovie
