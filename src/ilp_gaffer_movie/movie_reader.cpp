@@ -259,7 +259,7 @@ void MovieReader::hash(const Gaffer::ValuePlug *output,
 
 void MovieReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const
 {
-  IECore::msg(IECore::Msg::Info, "MovieReader", "compute");
+  //IECore::msg(IECore::Msg::Info, "MovieReader", "compute");
 
   ImageNode::compute(output, context);
 }
@@ -275,7 +275,7 @@ void MovieReader::hashViewNames(const GafferImage::ImagePlug * /*parent*/,
 IECore::ConstStringVectorDataPtr MovieReader::computeViewNames(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  IECore::msg(IECore::Msg::Info, "MovieReader", "computeViewNames");
+  //IECore::msg(IECore::Msg::Info, "MovieReader", "computeViewNames");
 
   const auto scope = FrameMaskScope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->viewNamesPlug()->getValue();
@@ -292,7 +292,7 @@ void MovieReader::hashFormat(const GafferImage::ImagePlug * /*parent*/,
 GafferImage::Format MovieReader::computeFormat(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  IECore::msg(IECore::Msg::Info, "MovieReader", "computeFormat");
+  //IECore::msg(IECore::Msg::Info, "MovieReader", "computeFormat");
 
   const auto scope = FrameMaskScope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->formatPlug()->getValue();
@@ -309,7 +309,7 @@ void MovieReader::hashDataWindow(const GafferImage::ImagePlug * /*parent*/,
 Imath::Box2i MovieReader::computeDataWindow(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  IECore::msg(IECore::Msg::Info, "MovieReader", "computeDataWindow");
+  //IECore::msg(IECore::Msg::Info, "MovieReader", "computeDataWindow");
 
   const auto scope = FrameMaskScope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->dataWindowPlug()->getValue();

@@ -289,7 +289,6 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
   IECore::MurmurHash &h) const
 {
   GafferImage::ImageNode::hash(output, context, h);
-  h.append(context->getFrame());
 
   if (output == availableFramesPlug()) {
     fileNamePlug()->hash(h);
@@ -302,8 +301,8 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
     Gaffer::Context::EditableScope c(context);
     c.remove(kTileBatchIndexContextName);
 
-    // hashFileName(c.context(), h);
     fileNamePlug()->hash(h);
+    h.append(context->getFrame());
     refreshCountPlug()->hash(h);
     // missingFrameModePlug()->hash(h);
   }
@@ -383,7 +382,7 @@ void AvReader::hashViewNames(const GafferImage::ImagePlug *parent,
 {
   GafferImage::ImageNode::hashViewNames(parent, context, h);
   fileNamePlug()->hash(h);
-  // hashFileName(context, h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
 }
@@ -402,8 +401,8 @@ void AvReader::hashFormat(const GafferImage::ImagePlug *parent,
   IECore::MurmurHash &h) const
 {
   ImageNode::hashFormat(parent, context, h);
-  // hashFileName( context, h );
   fileNamePlug()->hash(h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
   const auto format = GafferImage::FormatPlug::getDefaultFormat(context);
@@ -427,14 +426,13 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
     /*fromEXRSpace=*/false);
 }
 
-
 void AvReader::hashDataWindow(const GafferImage::ImagePlug *parent,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
   ImageNode::hashDataWindow(parent, context, h);
-  // hashFileName(context, h);
   fileNamePlug()->hash(h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
   h.append(context->get<std::string>(
@@ -457,8 +455,8 @@ void AvReader::hashMetadata(const GafferImage::ImagePlug *parent,
   IECore::MurmurHash &h) const
 {
   GafferImage::ImageNode::hashMetadata(parent, context, h);
-  //	hashFileName( context, h );
   fileNamePlug()->hash(h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
   h.append(context->get<std::string>(
@@ -489,8 +487,8 @@ void AvReader::hashDeep(const GafferImage::ImagePlug *parent,
   IECore::MurmurHash &h) const
 {
   GafferImage::ImageNode::hashDeep(parent, context, h);
-  // hashFileName( context, h );
   fileNamePlug()->hash(h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
   h.append(context->get<std::string>(
@@ -500,6 +498,7 @@ void AvReader::hashDeep(const GafferImage::ImagePlug *parent,
 bool AvReader::computeDeep(const Gaffer::Context * /*context*/,
   const GafferImage::ImagePlug * /*parent*/) const
 {
+  // Always false for video, this is an EXR thing.
   return false;
 }
 
@@ -507,16 +506,17 @@ void AvReader::hashSampleOffsets(const GafferImage::ImagePlug *parent,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
+  using ImagePlug = GafferImage::ImagePlug;
+
   GafferImage::ImageNode::hashSampleOffsets(parent, context, h);
 
-  h.append(context->get<Imath::V2i>(GafferImage::ImagePlug::tileOriginContextName));
-  h.append(context->get<std::string>(
-    GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
+  h.append(context->get<Imath::V2i>(ImagePlug::tileOriginContextName));
+  h.append(context->get<std::string>(ImagePlug::viewNameContextName, ImagePlug::defaultViewName));
 
   {
-    GafferImage::ImagePlug::GlobalScope c(context);
-    // hashFileName(context, h);
+    ImagePlug::GlobalScope c(context);
     fileNamePlug()->hash(h);
+    h.append(context->getFrame());
     refreshCountPlug()->hash(h);
     // missingFrameModePlug()->hash(h);
   }
@@ -526,6 +526,8 @@ IECore::ConstIntVectorDataPtr AvReader::computeSampleOffsets(const Imath::V2i & 
   const Gaffer::Context * /*context*/,
   const GafferImage::ImagePlug * /*parent*/) const
 {
+  // We don't have to worry about "deep" images or tile batches since we are not dealing with EXR
+  // images.
   return GafferImage::ImagePlug::flatTileSampleOffsets();
 }
 
@@ -534,32 +536,28 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
   IECore::MurmurHash &h) const
 {
   GafferImage::ImageNode::hashChannelNames(parent, context, h);
-  // hashFileName( context, h );
   fileNamePlug()->hash(h);
+  h.append(context->getFrame());
   refreshCountPlug()->hash(h);
   // missingFrameModePlug()->hash(h);
   h.append(context->get<std::string>(
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
 
-IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Context * /*context*/,
-  const GafferImage::ImagePlug * /*parent*/) const
+IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Context *context,
+  const GafferImage::ImagePlug *parent) const
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeChannelNames");
 
-#if 0
-  IECore::msg(IECore::Msg::Info, "AvReader", "Channel names");
-  for (auto&& name : parent->channelNamesPlug()->defaultValue()->readable()) {
-    IECore::msg(IECore::Msg::Info, "AvReader", boost::format("'%1'") % name);
-  }
-#endif
+  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  if (frame == nullptr) { return parent->channelNamesPlug()->defaultValue(); }
 
-  IECore::StringVectorDataPtr channelNamesData = new IECore::StringVectorData;
-  auto &channelNames = channelNamesData->writable();
-  channelNames.reserve(3);
-  channelNames.push_back(GafferImage::ImageAlgo::channelNameR);
-  channelNames.push_back(GafferImage::ImageAlgo::channelNameG);
-  channelNames.push_back(GafferImage::ImageAlgo::channelNameB);
+  // If we have a frame assume that it has RGB channels.
+  IECore::StringVectorDataPtr channelNamesData = new IECore::StringVectorData({
+    GafferImage::ImageAlgo::channelNameR,
+    GafferImage::ImageAlgo::channelNameG,
+    GafferImage::ImageAlgo::channelNameB,
+  });
   return channelNamesData;
 }
 
@@ -575,8 +573,8 @@ void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
 
   {
     GafferImage::ImagePlug::GlobalScope c(context);
-    // hashFileName(context, h);
     fileNamePlug()->hash(h);
+    h.append(context->getFrame());
     refreshCountPlug()->hash(h);
     // missingFrameModePlug()->hash(h);
   }
@@ -639,16 +637,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
       dst, src, sizeof(float) * (static_cast<size_t>(tileRegion.max.x - tileRegion.min.x)));
   }
 
-
-  // if (channelName == GafferImage::ImageAlgo::channelNameR) {
-  //   channel.resize(tile_size * tile_size, 1.0F);
-  // } else {
-  //   channel.resize(tile_size * tile_size, 0.0F);
-  // }
-
   return tileData;
-  // return parent->channelDataPlug()->defaultValue();
-  //  ...
 }
 
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,

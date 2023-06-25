@@ -367,7 +367,7 @@ TEST_CASE("test")
     [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
 
-#if 0
+#if 1
   const auto init_mux = [&](ilp_movie::MuxContext *mux_ctx) {
     REQUIRE(mux_ctx->impl == nullptr);
     {
@@ -440,7 +440,7 @@ TEST_CASE("test")
     REQUIRE(demux_ctx->impl == nullptr);
   };
 
-#if 0
+#if 1
   ilp_movie::MuxContext mux_ctx = {};
   mux_ctx.filename = "/tmp/demux.mp4";
   mux_ctx.codec_name = "libx264";
