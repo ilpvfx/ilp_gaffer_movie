@@ -202,7 +202,7 @@ class TaskMutex : boost::noncopyable
 						}
 					);
 
-					assert( (bool)status );
+					assert( status.has_value() );
 
 					executionStateLock.acquire( m_mutex->m_executionStateMutex );
 					m_mutex->m_executionState = nullptr;

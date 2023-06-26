@@ -167,17 +167,25 @@ extern "C" {
           // ...
           //
           if (filt_frame->format == AV_PIX_FMT_GBRPF32) {
-            auto frame_size = static_cast<size_t>(filt_frame->width);
-            frame_size *= static_cast<size_t>(filt_frame->height);
             demux_frame->width = filt_frame->width;
             demux_frame->height = filt_frame->height;
-            demux_frame->r.resize(frame_size);
-            demux_frame->g.resize(frame_size);
-            demux_frame->b.resize(frame_size);
-            const size_t byte_count = frame_size * sizeof(float);
-            std::memcpy(/*__dest=*/demux_frame->g.data(), /*__src=*/dec_frame->data[0], byte_count);
-            std::memcpy(/*__dest=*/demux_frame->b.data(), /*__src=*/dec_frame->data[1], byte_count);
-            std::memcpy(/*__dest=*/demux_frame->r.data(), /*__src=*/dec_frame->data[2], byte_count);
+            demux_frame->buf.resize(
+              3 * static_cast<size_t>(filt_frame->width) * static_cast<size_t>(filt_frame->height));
+            const auto r = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kRed);
+            const auto g = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kGreen);
+            const auto b = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kBlue);
+            std::memcpy(// NOLINT
+              /*__dest=*/g.data,
+              /*__src=*/dec_frame->data[0],
+              g.count * sizeof(float));
+            std::memcpy(// NOLINT
+              /*__dest=*/b.data,
+              /*__src=*/dec_frame->data[1],
+              b.count * sizeof(float));
+            std::memcpy(// NOLINT
+              /*__dest=*/r.data,
+              /*__src=*/dec_frame->data[2],
+              r.count * sizeof(float));
 
             // got_frame = true;
             goto end;
@@ -205,6 +213,36 @@ end:
   return true;
 }
 
+static constexpr size_t kBadChannelIndex = std::numeric_limits<size_t>::max();
+
+[[nodiscard]] static constexpr auto ChannelIndex(const ilp_movie::Channel ch) noexcept -> size_t
+{
+  size_t i = kBadChannelIndex;
+  // clang-format off
+  switch (ch) {
+  case ilp_movie::Channel::kGray:  
+  case ilp_movie::Channel::kRed:   i = 0; break;
+  case ilp_movie::Channel::kGreen: i = 1; break;
+  case ilp_movie::Channel::kBlue:  i = 2; break;
+  case ilp_movie::Channel::kAlpha: i = 3; break;
+  default: break;
+  }
+  // clang-format on
+  return i;
+}
+
+[[nodiscard]] static constexpr auto ImageSize(const int w, const int h) noexcept -> size_t
+{
+  if (!(w > 0 && h > 0)) { return 0; }
+  return static_cast<size_t>(w) * static_cast<size_t>(h);
+}
+
+[[nodiscard]] static constexpr auto PixelDataOffset(const size_t image_size,
+  const size_t channel_index) noexcept -> size_t
+{
+  return image_size * channel_index;
+}
+
 namespace {
 
 struct SeekEntry
@@ -226,6 +264,31 @@ struct SeekTable
 }// namespace
 
 namespace ilp_movie {
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(const DemuxFrame &f, Channel ch) noexcept
+  -> PixelData<const float>
+{
+  const size_t image_size = ImageSize(f.width, f.height);
+  if (image_size == 0) { return {}; }
+  const size_t ch_index = ChannelIndex(ch);
+  if (ch_index == kBadChannelIndex) { return {}; }
+  const size_t p_offset = PixelDataOffset(image_size, ch_index);
+  if (!(p_offset < f.buf.size())) { return {}; }
+  return { /*.data=*/&(f.buf[p_offset]), /*.count=*/image_size };
+}
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(DemuxFrame *const f, Channel ch) noexcept
+  -> PixelData<float>
+{
+  assert(f != nullptr);// NOLINT
+  const size_t image_size = ImageSize(f->width, f->height);
+  if (image_size == 0) { return {}; }
+  const size_t ch_index = ChannelIndex(ch);
+  if (ch_index == kBadChannelIndex) { return {}; }
+  const size_t p_offset = PixelDataOffset(image_size, ch_index);
+  if (!(p_offset < f->buf.size())) { return {}; }
+  return { /*.data=*/&(f->buf[p_offset]), /*.count=*/image_size };
+}
 
 struct DemuxImpl
 {
@@ -343,9 +406,11 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
 
   frame->width = impl->dec_ctx->width;
   frame->height = impl->dec_ctx->height;
-  frame->r.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
-  frame->g.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
-  frame->b.resize(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height), 0.F);
+  frame->buf.resize(
+    3 * static_cast<size_t>(impl->dec_ctx->width) * static_cast<size_t>(impl->dec_ctx->height));
+  const auto r = ChannelData(frame, Channel::kRed);
+  const auto g = ChannelData(frame, Channel::kGreen);
+  const auto b = ChannelData(frame, Channel::kBlue);
   for (int y = 0; y < frame->height; ++y) {
     for (int x = 0; x < frame->width; ++x) {
       const auto i =
@@ -354,17 +419,17 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
       const auto yy = static_cast<float>(y);
       const float d = std::sqrt((xx - cx) * (xx - cx) + (yy - cy) * (yy - cy)) - kR;
       if (d < 0) {
-        frame->b[i] = std::abs(d);
-        frame->b[i] /=
+        b.data[i] = std::abs(d);// NOLINT
+        b.data[i] /=// NOLINT
           static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
                                        + impl->dec_ctx->height * impl->dec_ctx->height));
       } else {
-        frame->r[i] = d;
-        frame->r[i] /=
+        r.data[i] = d;// NOLINT
+        r.data[i] /=// NOLINT
           static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
                                        + impl->dec_ctx->height * impl->dec_ctx->height));
       }
-      frame->g[i] = 0.F;
+      g.data[i] = 0.F;// NOLINT
     }
   }
 

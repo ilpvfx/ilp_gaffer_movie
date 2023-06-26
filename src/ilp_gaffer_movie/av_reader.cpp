@@ -124,9 +124,7 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
   demux_frame_ptr->width = demux_frame.width;
   demux_frame_ptr->height = demux_frame.height;
   demux_frame_ptr->frame_index = demux_frame.frame_index;
-  demux_frame_ptr->r = std::move(demux_frame.r);
-  demux_frame_ptr->g = std::move(demux_frame.g);
-  demux_frame_ptr->b = std::move(demux_frame.b);
+  demux_frame_ptr->buf = std::move(demux_frame.buf);
 
   result.frame.reset(new Frame(std::move(demux_frame_ptr)));// NOLINT
   return result;
@@ -617,13 +615,13 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   auto &tile = tileData->writable();
 
   const auto *f = frame->_frame.get();
-  const std::vector<float> *ch = nullptr;
+  ilp_movie::PixelData ch = {};
   if (channelName == GafferImage::ImageAlgo::channelNameR) {
-    ch = &(f->r);
+    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
   } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-    ch = &(f->g);
+    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
   } else {// channelName == GafferImage::ImageAlgo::channelNameB
-    ch = &(f->b);
+    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
   }
 
   const Imath::Box2i tileRegion = GafferImage::BufferAlgo::intersection(tileBound, dataWindow);
@@ -631,8 +629,8 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   for (int y = tileRegion.min.y; y < tileRegion.max.y; ++y) {
     float *dst = &tile[static_cast<size_t>(y - tileRegion.min.y)
                        * static_cast<size_t>(GafferImage::ImagePlug::tileSize())];
-    const float *src = &(*ch)[static_cast<size_t>(y) * static_cast<size_t>(f->width)
-                              + static_cast<size_t>(tileRegion.min.x)];
+    const float *src = &(ch.data[static_cast<size_t>(y) * static_cast<size_t>(f->width)// NOLINT
+                                 + static_cast<size_t>(tileRegion.min.x)]);
     std::memcpy(
       dst, src, sizeof(float) * (static_cast<size_t>(tileRegion.max.x - tileRegion.min.x)));
   }

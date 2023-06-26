@@ -358,7 +358,30 @@ static void DumpLogLinesIf(std::vector<std::string> *log_lines, const bool cond)
   if (cond) { DumpLogLines(log_lines); }
 }
 
+
 namespace {
+
+#if 0
+template <typename T>
+struct SpanT {
+  T* data = nullptr;
+  std::size_t count = 0;
+};
+
+TEST_CASE("span")
+{
+  using ConstSpan = SpanT<const float>;
+  using Span = SpanT<float>;
+
+  std::vector<float> v;
+  v.resize(10);
+
+  Span s = {&v[0], 10};
+  s.data[3] = 7.9F;//NOLINT
+  ConstSpan cs = {&v[0], 10};
+  cs.data[3] = 7.9F;//NOLINT
+}
+#endif
 
 TEST_CASE("test")
 {
