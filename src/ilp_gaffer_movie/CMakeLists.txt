@@ -1,6 +1,7 @@
 include(GenerateExportHeader)
 
 add_library(IlpGafferMovie SHARED 
+  av_reader.cpp
   movie_reader.cpp
   movie_writer.cpp)
 add_library(ilp_gaffer_movie::IlpGafferMovie ALIAS IlpGafferMovie)  
@@ -14,7 +15,8 @@ target_include_directories(IlpGafferMovie ${WARNING_GUARD}
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>)
 target_include_directories(IlpGafferMovie 
   PRIVATE 
-    "${CMAKE_BINARY_DIR}/configured_files/include")
+    "${CMAKE_BINARY_DIR}/configured_files/include"
+    ${CMAKE_CURRENT_LIST_DIR})
 target_compile_features(IlpGafferMovie 
   PUBLIC cxx_std_17)
 set_target_properties(IlpGafferMovie
@@ -35,12 +37,14 @@ target_compile_definitions(IlpGafferMovie
 # endif()
 target_link_libraries(IlpGafferMovie
   PUBLIC
-    ilp_mux)
+    ilp_movie::ilp_movie)
 target_link_system_libraries(IlpGafferMovie 
   PUBLIC
     Gaffer::Gaffer 
     Gaffer::GafferScene 
     Gaffer::IECore)
+
 generate_export_header(IlpGafferMovie 
   EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/ilp_gaffer_movie/ilp_gaffer_movie_export.hpp)
+
 install(TARGETS IlpGafferMovie DESTINATION lib)
