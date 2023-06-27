@@ -1,10 +1,6 @@
 name: Build Docker image
 on:
   workflow_dispatch:
-  # workflow_run: 
-  #   workflows: [ci]
-  #   types:
-  #     - requested
 
 env:
   REGISTRY: ghcr.io

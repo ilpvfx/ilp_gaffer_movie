@@ -1,3 +1,3 @@
 add_subdirectory(ilp_gaffer_movie)
 add_subdirectory(ilp_gaffer_movie_module)
-add_subdirectory(ilp_mux)
+add_subdirectory(ilp_movie)

@@ -1,16 +1,10 @@
 #pragma once
 
-#include <string>
-
-#include <Gaffer/CompoundNumericPlug.h>
+#include <Gaffer/NumericPlug.h>
 #include <GafferImage/ImageNode.h>
 
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
-
-// ENV
-// export IECORE_LOG_LEVEL=Info
-// export GAFFER_EXTENSION_PATHS=~/dev/git/gaffer_extension_example/install:$GAFFER_EXTENSION_PATHS
 
 namespace Gaffer {
 IE_CORE_FORWARDDECLARE(StringPlug)
@@ -18,26 +12,15 @@ IE_CORE_FORWARDDECLARE(StringPlug)
 
 namespace IlpGafferMovie {
 
-IE_CORE_FORWARDDECLARE(AvReader)
-
-class ILPGAFFERMOVIE_EXPORT MovieReader : public GafferImage::ImageNode
+class ILPGAFFERMOVIE_EXPORT AvReader : public GafferImage::ImageNode
 {
 public:
-  explicit MovieReader(const std::string &name = defaultName<MovieReader>());
-  ~MovieReader() override = default;
+  explicit AvReader(const std::string &name = defaultName<AvReader>());
+  ~AvReader() override = default;
 
-  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::MovieReader,
-    TypeId::kMovieReaderTypeId,
-    GafferImage::ImageNode)
-
-  // The FrameMaskMode controls how to handle images
-  // outside of the values provided by the start
-  // and end frame masks.
-  enum class FrameMaskMode : int {
-    kNone = 0,
-    kBlackOutside,
-    kClampToFrame,
-  };
+  GAFFER_NODE_DECLARE_TYPE(IlpGafferMovie::AvReader,
+    TypeId::kAvReaderTypeId,
+    GafferImage::ImageNode);
 
   Gaffer::StringPlug *fileNamePlug();
   const Gaffer::StringPlug *fileNamePlug() const;
@@ -46,21 +29,21 @@ public:
   Gaffer::IntPlug *refreshCountPlug();
   const Gaffer::IntPlug *refreshCountPlug() const;
 
-  Gaffer::IntPlug *startModePlug();
-  const Gaffer::IntPlug *startModePlug() const;
+#if 0
+  enum class MissingFrameMode : int {
+    kError = 0,
+    kBlack,
+    kHold,
+  };
 
-  Gaffer::IntPlug *startFramePlug();
-  const Gaffer::IntPlug *startFramePlug() const;
+  Gaffer::IntPlug *missingFrameModePlug();
+  const Gaffer::IntPlug *missingFrameModePlug() const;
+#endif
 
-  Gaffer::IntPlug *endModePlug();
-  const Gaffer::IntPlug *endModePlug() const;
-
-  Gaffer::IntPlug *endFramePlug();
-  const Gaffer::IntPlug *endFramePlug() const;
+  Gaffer::IntVectorDataPlug *availableFramesPlug();
+  const Gaffer::IntVectorDataPlug *availableFramesPlug() const;
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
-
-  // static size_t supportedExtensions( std::vector<std::string> &extensions );
 
 protected:
   void hash(const Gaffer::ValuePlug *output,
@@ -68,6 +51,7 @@ protected:
     IECore::MurmurHash &h) const override;
 
   void compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const override;
+  Gaffer::ValuePlug::CachePolicy computeCachePolicy(const Gaffer::ValuePlug *output) const override;
 
   void hashViewNames(const GafferImage::ImagePlug *parent,
     const Gaffer::Context *context,
@@ -121,22 +105,16 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
-  // We use internal nodes to do all the hard work,
-  // but we need to store intermediate results between
-  // those nodes in order to affect the outcome.
+  Gaffer::ObjectVectorPlug *_tileBatchPlug();
+  const Gaffer::ObjectVectorPlug *_tileBatchPlug() const;
 
-  AvReader *_avReader();
-  const AvReader *_avReader() const;
+  std::shared_ptr<void> _retrieveFrame(const Gaffer::Context *context/*, bool holdForBlack = false*/) const;
 
-  Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug();
-  const Gaffer::AtomicCompoundDataPlug *_intermediateMetadataPlug() const;
-
-  GafferImage::ImagePlug *_intermediateImagePlug();
-  const GafferImage::ImagePlug *_intermediateImagePlug() const;
+  void _plugSet(Gaffer::Plug *plug);
 
   static std::size_t FirstPlugIndex;
 };
 
-IE_CORE_DECLAREPTR(MovieReader)
+IE_CORE_DECLAREPTR(AvReader)
 
 }// namespace IlpGafferMovie
