@@ -481,7 +481,7 @@ TEST_CASE("test")
   const auto seek_frames = [&](const ilp_movie::DemuxContext &demux_ctx, const int frame_count) {
     std::vector<int> frame_range(static_cast<std::size_t>(frame_count));
     std::iota(std::begin(frame_range), std::end(frame_range), 1);    
-    auto rng = std::default_random_engine{ 1981 };// NOLINT
+    auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
     std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
 
     for (const auto frame_nb : frame_range) {
