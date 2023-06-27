@@ -20,3 +20,5 @@ RUN git clone --depth 1 --branch ffmpeg-5.1 https://github.com/piratecrew/rez-ff
 
 RUN cd /tmp && wget https://github.com/GafferHQ/gaffer/releases/download/1.2.0.2/gaffer-1.2.0.2-linux.tar.gz && \
     mkdir -p /opt/gaffer-1.2.0.2 && tar -xf gaffer-1.2.0.2-linux.tar.gz -C /opt/gaffer-1.2.0.2 --strip-components=1
+
+RUN mkdir /tmp/test_data

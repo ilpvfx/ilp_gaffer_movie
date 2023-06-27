@@ -130,7 +130,9 @@ auto ConfigureVideoFilters(const FilterGraphArgs &args,
     return exit_func(/*success=*/false);
   }
 
-  graph->scale_sws_opts = av_strdup(args.sws_flags.c_str());
+  if (!args.sws_flags.empty()) {
+    graph->scale_sws_opts = av_strdup(args.sws_flags.c_str());
+  }
 
   if (!(filter_graph != nullptr && buffersink_ctx != nullptr && buffersink_ctx != nullptr)) {
     ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot return filter graph\n");

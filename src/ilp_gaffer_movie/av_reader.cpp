@@ -103,27 +103,25 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
     IECore::msg(iec_level, "MovieReader", str);
   });
 
-  ilp_movie::DemuxContext demux_ctx = {};
-  demux_ctx.filename = key.first.c_str();
-  if (!ilp_movie::DemuxInit(&demux_ctx)) {
+  ilp_movie::DemuxParams demux_params = {};
+  demux_params.filename = key.first.c_str();
+  auto demux_ctx = ilp_movie::MakeDemuxContext(demux_params);
+  if (demux_ctx == nullptr) {
     result.error.reset(new std::string("AvReader : Cannot initialize demuxer"));// NOLINT
-    // No need to free the demux context when init fails.
     return result;
   }
 
   ilp_movie::DemuxFrame demux_frame = {};
-  if (!ilp_movie::DemuxSeek(demux_ctx, key.second, &demux_frame)) {
-    ilp_movie::DemuxFree(&demux_ctx);
+  if (!ilp_movie::DemuxSeek(*demux_ctx, key.second, &demux_frame)) {
     result.error.reset(new std::string("AvReader : Cannot seek to frame"));// NOLINT
     return result;
   }
-
-  ilp_movie::DemuxFree(&demux_ctx);
 
   auto demux_frame_ptr = std::make_unique<ilp_movie::DemuxFrame>();
   demux_frame_ptr->width = demux_frame.width;
   demux_frame_ptr->height = demux_frame.height;
   demux_frame_ptr->frame_index = demux_frame.frame_index;
+  demux_frame_ptr->pix_fmt = demux_frame.pix_fmt;
   demux_frame_ptr->buf = std::move(demux_frame.buf);
 
   result.frame.reset(new Frame(std::move(demux_frame_ptr)));// NOLINT
@@ -420,7 +418,7 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
     /*displayWindow=*/Imath::Box2i(
       /*minT=*/Imath::V2i(0, 0),
       /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height)),
-    /*pixelAspect=*/1.0,
+    /*pixelAspect=*/frame->_frame->pixel_aspect_ratio,
     /*fromEXRSpace=*/false);
 }
 
@@ -550,12 +548,30 @@ IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Con
   std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelNamesPlug()->defaultValue(); }
 
-  // If we have a frame assume that it has RGB channels.
-  IECore::StringVectorDataPtr channelNamesData = new IECore::StringVectorData({
-    GafferImage::ImageAlgo::channelNameR,
-    GafferImage::ImageAlgo::channelNameG,
-    GafferImage::ImageAlgo::channelNameB,
-  });
+  // clang-format off
+  IECore::StringVectorDataPtr channelNamesData = nullptr;
+  switch (frame->_frame->pix_fmt) {
+  case ilp_movie::PixelFormat::kGray:
+  case ilp_movie::PixelFormat::kRGB:
+    channelNamesData = new IECore::StringVectorData({// NOLINT
+      GafferImage::ImageAlgo::channelNameR,
+      GafferImage::ImageAlgo::channelNameG,
+      GafferImage::ImageAlgo::channelNameB,
+    });
+    break;
+  case ilp_movie::PixelFormat::kRGBA:
+    channelNamesData = new IECore::StringVectorData({// NOLINT
+      GafferImage::ImageAlgo::channelNameR,
+      GafferImage::ImageAlgo::channelNameG,
+      GafferImage::ImageAlgo::channelNameB,
+      GafferImage::ImageAlgo::channelNameA,
+    });
+    break;
+  case ilp_movie::PixelFormat::kNone:
+  default:
+    throw IECore::Exception(boost::str(boost::format("Unspecified frame pixel format")));
+  }
+  // clang-format on
   return channelNamesData;
 }
 
@@ -616,12 +632,33 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 
   const auto *f = frame->_frame.get();
   ilp_movie::PixelData ch = {};
-  if (channelName == GafferImage::ImageAlgo::channelNameR) {
+  switch (frame->_frame->pix_fmt) {
+  case ilp_movie::PixelFormat::kGray:
     ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
-  } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
-  } else {// channelName == GafferImage::ImageAlgo::channelNameB
-    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
+    break;
+  case ilp_movie::PixelFormat::kRGB:
+    if (channelName == GafferImage::ImageAlgo::channelNameR) {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
+    } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
+    } else {// channelName == GafferImage::ImageAlgo::channelNameB
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
+    }
+    break;
+  case ilp_movie::PixelFormat::kRGBA:
+    if (channelName == GafferImage::ImageAlgo::channelNameR) {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
+    } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
+    } else if (channelName == GafferImage::ImageAlgo::channelNameB) {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
+    } else {
+      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kAlpha);
+    }
+    break;
+  case ilp_movie::PixelFormat::kNone:
+  default:
+    throw IECore::Exception(boost::str(boost::format("Unspecified frame pixel format")));
   }
 
   const Imath::Box2i tileRegion = GafferImage::BufferAlgo::intersection(tileBound, dataWindow);

@@ -20,7 +20,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
-//#include <libswresample/swresample.h>
 }
 // clang-format on
 
@@ -85,7 +84,7 @@ extern "C" {
   if (const int ret =
         avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[stream_index]->codecpar);// NOLINT
       ret < 0) {
-    log_utils_internal::LogAvError("Could not copy decoder parameters to the input stream", ret);
+    log_utils_internal::LogAvError("Cannot copy decoder parameters to the input stream", ret);
     return false;
   }
 
@@ -95,6 +94,8 @@ extern "C" {
     return false;
   }
 
+  // Set outputs.
+  assert(ifmt_ctx != nullptr && dec_ctx != nullptr && video_stream_index != nullptr);// NOLINT
   *ifmt_ctx = fmt_ctx;
   *dec_ctx = codec_ctx;
   *video_stream_index = stream_index;
@@ -102,7 +103,7 @@ extern "C" {
   return true;
 }
 
-[[nodiscard]] auto ReadFrame(AVFormatContext *ifmt_ctx,
+[[nodiscard]] static auto ReadFrame(AVFormatContext *ifmt_ctx,
   AVCodecContext *dec_ctx,
   AVFilterContext *buffersrc_ctx,
   AVFilterContext *buffersink_ctx,
@@ -176,15 +177,15 @@ extern "C" {
             const auto b = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kBlue);
             std::memcpy(// NOLINT
               /*__dest=*/g.data,
-              /*__src=*/dec_frame->data[0],
+              /*__src=*/filt_frame->data[0],
               g.count * sizeof(float));
             std::memcpy(// NOLINT
               /*__dest=*/b.data,
-              /*__src=*/dec_frame->data[1],
+              /*__src=*/filt_frame->data[1],
               b.count * sizeof(float));
             std::memcpy(// NOLINT
               /*__dest=*/r.data,
-              /*__src=*/dec_frame->data[2],
+              /*__src=*/filt_frame->data[2],
               r.count * sizeof(float));
 
             // got_frame = true;
@@ -211,6 +212,21 @@ end:
   }
 
   return true;
+}
+
+[[nodiscard]] static constexpr auto AvPixelFormat(const ilp_movie::PixelFormat pix_fmt) noexcept
+  -> AVPixelFormat
+{
+  AVPixelFormat p = AV_PIX_FMT_NONE;
+  // clang-format off
+  switch (pix_fmt) {
+  case ilp_movie::PixelFormat::kGray: p = AV_PIX_FMT_GRAYF32;  break;
+  case ilp_movie::PixelFormat::kRGB:  p = AV_PIX_FMT_GBRPF32;  break;
+  case ilp_movie::PixelFormat::kRGBA: p = AV_PIX_FMT_GBRAPF32; break;
+  default: break;
+  }
+  // clang-format on
+  return p;
 }
 
 static constexpr size_t kBadChannelIndex = std::numeric_limits<size_t>::max();
@@ -306,34 +322,31 @@ struct DemuxImpl
   SeekTable seek_table = {};
 };
 
-auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noexcept -> bool
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeDemuxContext(const DemuxParams &params/*,
+  DemuxFrame *first_frame*/) noexcept -> std::unique_ptr<DemuxContext>
 {
-  // Helper function to make sure we always tear down allocated resources
-  // before exiting as a result of failure.
-  const auto exit_func = [](const bool success, DemuxContext *const demux_ctx_arg) noexcept {
-    if (!success && demux_ctx_arg != nullptr && demux_ctx_arg->impl != nullptr) {
-      DemuxFree(demux_ctx_arg);
-    }
-    return success;
-  };
-
-  if (demux_ctx == nullptr) {
-    LogMsg(LogLevel::kError, "Bad demux context");
-    return exit_func(/*success=*/false, demux_ctx);
+  if (params.filename == nullptr) {
+    LogMsg(LogLevel::kError, "Empty filename\n");
+    return nullptr;
   }
-  if (demux_ctx->impl != nullptr) {
-    LogMsg(LogLevel::kError, "Found stale demux implementation");
-    return exit_func(/*success=*/false, demux_ctx);
-  }
-  if (demux_ctx->filename == nullptr) {
-    LogMsg(LogLevel::kError, "Bad filename");
-    return exit_func(/*success=*/false, demux_ctx);
+  if (AvPixelFormat(params.pix_fmt) == AV_PIX_FMT_NONE) {
+    LogMsg(LogLevel::kError, "Unspecified pixel format\n");
+    return nullptr;
   }
 
-  // Allocate the implementation specific data.
-  // MUST be manually free'd at some later point.
-  demux_ctx->impl = new DemuxImpl;// NOLINT
-  DemuxImpl *impl = demux_ctx->impl;
+  // Allocate the implementation specific data. The deleter will be invoked if we leave this
+  // function before moving the implementation to the context.
+  auto impl = demux_impl_ptr(new DemuxImpl(), [](DemuxImpl *impl_ptr) {
+    LogMsg(LogLevel::kInfo, "Free demux implementation\n");
+
+    avfilter_graph_free(&(impl_ptr->filter_graph));
+    avcodec_free_context(&(impl_ptr->dec_ctx));
+    avformat_close_input(&(impl_ptr->ifmt_ctx));
+    av_frame_free(&(impl_ptr->dec_frame));
+    av_frame_free(&(impl_ptr->filt_frame));
+    av_packet_free(&(impl_ptr->dec_pkt));
+    delete impl_ptr;// NOLINT
+  });
 
   // Allocate packets and frames.
   impl->dec_pkt = av_packet_alloc();
@@ -341,16 +354,16 @@ auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noex
   impl->filt_frame = av_frame_alloc();
   if (!(impl->dec_pkt != nullptr && impl->dec_frame != nullptr && impl->filt_frame != nullptr)) {
     LogMsg(LogLevel::kError, "Cannot allocate frames/packets\n");
-    return exit_func(/*success=*/false, demux_ctx);
+    return nullptr;
   }
 
   if (!OpenInputFile(
-        demux_ctx->filename, &(impl->ifmt_ctx), &(impl->dec_ctx), &(impl->video_stream_index))) {
-    return exit_func(/*success=*/false, demux_ctx);
+        params.filename, &(impl->ifmt_ctx), &(impl->dec_ctx), &(impl->video_stream_index))) {
+    return nullptr;
   }
   assert(impl->video_stream_index >= 0);// NOLINT
 
-  av_dump_format(impl->ifmt_ctx, impl->video_stream_index, demux_ctx->filename, /*is_output=*/0);
+  av_dump_format(impl->ifmt_ctx, impl->video_stream_index, params.filename, /*is_output=*/0);
 
   // "scale=w=0:h=0:out_color_matrix=bt709"
   filter_graph_internal::FilterGraphArgs fg_args = {};
@@ -359,13 +372,14 @@ auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noex
   fg_args.sws_flags = "";
   fg_args.in.pix_fmt = impl->dec_ctx->pix_fmt;
   fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
-  fg_args.out.pix_fmt = AV_PIX_FMT_GBRPF32;
+  fg_args.out.pix_fmt = AvPixelFormat(params.pix_fmt);
   if (!filter_graph_internal::ConfigureVideoFilters(
         fg_args, &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
-    return exit_func(/*success=*/false, demux_ctx);
+    return nullptr;
   }
 
-#if 0
+#if 1
+  DemuxFrame first_frame = {};
   if (!ReadFrame(impl->ifmt_ctx,
         impl->dec_ctx,
         impl->buffersrc_ctx,
@@ -374,16 +388,21 @@ auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noex
         impl->dec_frame,
         impl->filt_frame,
         impl->video_stream_index,
-        first_frame)) {
-    return exit_func(/*success=*/false, demux_ctx);
+        &first_frame)) {
+    return nullptr;
   }
+  (void)first_frame;
 #endif
 
-  return exit_func(/*success=*/true, demux_ctx);
+  auto demux_ctx = std::make_unique<DemuxContext>();
+  demux_ctx->params = params;
+  demux_ctx->impl = std::move(impl);
+  return demux_ctx;
 }
 
+
 #if 0
-[[nodiscard]] static int64_t FrameToPts(AVStream *st, const int frame)
+[[nodiscard]] static auto FrameToPts(AVStream *st, const int frame) noexcept -> int64_t
 {
   // NOTE(tohi): Assuming that the stream has constant frame rate!
   const auto frame_rate = st->r_frame_rate;
@@ -396,8 +415,21 @@ auto DemuxInit(DemuxContext *const demux_ctx /*, DemuxFrame *first_frame*/) noex
 auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *const frame) noexcept
   -> bool
 {
-  const auto *impl = demux_ctx.impl;
+  const auto *impl = demux_ctx.impl.get();
   if (impl == nullptr) { return false; }
+
+  const PixelFormat pix_fmt = std::invoke([&] {
+    switch (frame_pos % 3) {
+    case 0:
+      return PixelFormat::kGray;
+    case 1:
+      return PixelFormat::kRGB;
+    case 2:
+      return PixelFormat::kRGBA;
+    default:
+      return PixelFormat::kNone;
+    }
+  });
 
   // TMP!!
   const auto cx = 0.5F * static_cast<float>(impl->dec_ctx->width) + static_cast<float>(frame_pos);
@@ -406,11 +438,15 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
 
   frame->width = impl->dec_ctx->width;
   frame->height = impl->dec_ctx->height;
-  frame->buf.resize(
-    3 * static_cast<size_t>(impl->dec_ctx->width) * static_cast<size_t>(impl->dec_ctx->height));
+  frame->pixel_aspect_ratio = 1.0;
+  frame->pix_fmt = pix_fmt;
+  frame->buf.resize(ChannelCount(pix_fmt) * static_cast<size_t>(impl->dec_ctx->width)
+                      * static_cast<size_t>(impl->dec_ctx->height),
+    0.F);
   const auto r = ChannelData(frame, Channel::kRed);
   const auto g = ChannelData(frame, Channel::kGreen);
   const auto b = ChannelData(frame, Channel::kBlue);
+  const auto a = ChannelData(frame, Channel::kAlpha);
   for (int y = 0; y < frame->height; ++y) {
     for (int x = 0; x < frame->width; ++x) {
       const auto i =
@@ -418,18 +454,46 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
       const auto xx = static_cast<float>(x);
       const auto yy = static_cast<float>(y);
       const float d = std::sqrt((xx - cx) * (xx - cx) + (yy - cy) * (yy - cy)) - kR;
-      if (d < 0) {
-        b.data[i] = std::abs(d);// NOLINT
-        b.data[i] /=// NOLINT
-          static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
-                                       + impl->dec_ctx->height * impl->dec_ctx->height));
-      } else {
-        r.data[i] = d;// NOLINT
+
+      switch (frame->pix_fmt) {
+      case PixelFormat::kGray:
+        r.data[i] = std::abs(d);// NOLINT
         r.data[i] /=// NOLINT
           static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
                                        + impl->dec_ctx->height * impl->dec_ctx->height));
+        break;
+      case PixelFormat::kRGB:
+        if (d < 0) {
+          b.data[i] = std::abs(d);// NOLINT
+          b.data[i] /=// NOLINT
+            static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                         + impl->dec_ctx->height * impl->dec_ctx->height));
+        } else {
+          r.data[i] = d;// NOLINT
+          r.data[i] /=// NOLINT
+            static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                         + impl->dec_ctx->height * impl->dec_ctx->height));
+        }
+        g.data[i] = 0.F;// NOLINT
+        break;
+      case PixelFormat::kRGBA:
+        if (d < 0) {
+          r.data[i] = std::abs(d);// NOLINT
+          r.data[i] /=// NOLINT
+            static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                         + impl->dec_ctx->height * impl->dec_ctx->height));
+        } else {
+          g.data[i] = d;// NOLINT
+          g.data[i] /=// NOLINT
+            static_cast<float>(std::sqrt(impl->dec_ctx->width * impl->dec_ctx->width
+                                         + impl->dec_ctx->height * impl->dec_ctx->height));
+        }
+        b.data[i] = 0.F;// NOLINT
+        a.data[i] = (d < 0) ? 1.F : 0.F;// NOLINT
+        break;
+      case PixelFormat::kNone:
+        break;
       }
-      g.data[i] = 0.F;// NOLINT
     }
   }
 
@@ -494,24 +558,5 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
   return true;
 #endif
 }
-
-
-void DemuxFree(DemuxContext *demux_ctx) noexcept
-{
-  if (demux_ctx == nullptr) { return; }// Nothing to free!
-  DemuxImpl *impl = demux_ctx->impl;
-  if (impl == nullptr) { return; }// Nothing to free!
-
-  avfilter_graph_free(&(impl->filter_graph));
-  avcodec_free_context(&(impl->dec_ctx));
-  avformat_close_input(&(impl->ifmt_ctx));
-  av_frame_free(&(impl->dec_frame));
-  av_frame_free(&(impl->filt_frame));
-  av_packet_free(&(impl->dec_pkt));
-
-  delete impl;// NOLINT
-  demux_ctx->impl = nullptr;
-}
-
 
 }// namespace ilp_movie

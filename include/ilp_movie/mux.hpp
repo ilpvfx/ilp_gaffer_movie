@@ -272,6 +272,7 @@ struct MuxFrame
   const float *r = nullptr;
   const float *g = nullptr;
   const float *b = nullptr;
+  const float *a = nullptr;
 };
 
 // Initialize the internal resources required to start encoding video frames.
