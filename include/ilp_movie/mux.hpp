@@ -41,10 +41,11 @@
 #pragma once
 
 #include <functional>// std::function
-#include <optional>
+#include <memory>// std::unique_ptr
+#include <optional>// std::optional
 #include <string_view>// std::string_view
 
-#include <ilp_movie/ilp_movie_export.hpp>
+#include <ilp_movie/ilp_movie_export.hpp>// ILP_MOVIE_EXPORT
 
 namespace ilp_movie {
 
@@ -205,10 +206,9 @@ namespace h264 {
 }// namespace h264
 
 struct MuxImpl;
+using mux_impl_ptr = std::unique_ptr<MuxImpl, std::function<void(MuxImpl *)>>;
 
-//
-struct MuxContext
-{
+struct MuxParams {
   // The filename cannot be null.
   // If format_name is null the output format is guessed according to the file extension.
   const char *filename = nullptr;
@@ -251,11 +251,18 @@ struct MuxContext
   {
     h264::Config cfg = {};
   } h264 = {};
+};
+
+//
+struct MuxContext
+{
+  MuxParams params = {};
 
   // Private implementation specific data stored as an opaque pointer.
   // The implementation specific data contains low-level resources such as
-  // format context, codecs, etc.
-  MuxImpl *impl = nullptr;
+  // format context, codecs, etc. The resources are automatically freed when this
+  // context is destroyed.
+  mux_impl_ptr impl = nullptr;
 };
 
 // Describes how pixel data is passed to the muxer.
@@ -276,14 +283,7 @@ struct MuxFrame
 };
 
 // Initialize the internal resources required to start encoding video frames.
-//
-// If true is returned, it is possible to start sending frames to the muxer using the
-// MuxWriteFrame{} function. At some later point when all frames have been written the internal
-// resources must be free'd by calling MuxFree{}.
-//
-// If false is returned, the internal resources could not be allocated. The mux context will be
-// unusable. There is no need to call MuxFree{} in this case.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MuxInit(MuxContext *mux_ctx) noexcept -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxContext(const MuxParams &params) noexcept -> std::unique_ptr<MuxContext>;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.
@@ -301,14 +301,5 @@ struct MuxFrame
 // Returns true if successful, otherwise false.
 // Note that the MuxContext must be manually free'd using MuxFreeImpl{} regardless of success.
 [[nodiscard]] ILP_MOVIE_EXPORT auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool;
-
-// Free the resources allocated by the implementation in MuxInit{}. The implementation pointer will
-// be set to null.
-//
-// MUST be called _before_ MuxContext is destroyed.
-//
-// Note: Only MuxContext instances that have been passed to a successful MuxInit{} call need to free
-// their implementations.
-ILP_MOVIE_EXPORT void MuxFree(MuxContext *mux_ctx) noexcept;
 
 }// namespace ilp_movie

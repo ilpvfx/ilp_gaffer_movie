@@ -24,6 +24,7 @@ extern "C" {
 // clang-format on
 
 #include <ilp_movie/log.hpp>
+#include <ilp_movie/pixel_data.hpp>
 #include <internal/dict_utils.hpp>
 #include <internal/filter_graph.hpp>
 #include <internal/log_utils.hpp>
@@ -111,7 +112,7 @@ extern "C" {
   AVFrame *dec_frame,
   AVFrame *filt_frame,
   const int video_stream_index,
-  ilp_movie::DemuxFrame *demux_frame) noexcept -> bool
+  ilp_movie::DemuxFrame * /*demux_frame*/) noexcept -> bool
 {
   bool got_frame = false;
   int ret = 0;
@@ -168,6 +169,7 @@ extern "C" {
           // ...
           //
           if (filt_frame->format == AV_PIX_FMT_GBRPF32) {
+#if 0
             demux_frame->width = filt_frame->width;
             demux_frame->height = filt_frame->height;
             demux_frame->buf.resize(
@@ -187,6 +189,7 @@ extern "C" {
               /*__dest=*/r.data,
               /*__src=*/filt_frame->data[2],
               r.count * sizeof(float));
+#endif
 
             // got_frame = true;
             goto end;
@@ -229,36 +232,6 @@ end:
   return p;
 }
 
-static constexpr size_t kBadChannelIndex = std::numeric_limits<size_t>::max();
-
-[[nodiscard]] static constexpr auto ChannelIndex(const ilp_movie::Channel ch) noexcept -> size_t
-{
-  size_t i = kBadChannelIndex;
-  // clang-format off
-  switch (ch) {
-  case ilp_movie::Channel::kGray:  
-  case ilp_movie::Channel::kRed:   i = 0; break;
-  case ilp_movie::Channel::kGreen: i = 1; break;
-  case ilp_movie::Channel::kBlue:  i = 2; break;
-  case ilp_movie::Channel::kAlpha: i = 3; break;
-  default: break;
-  }
-  // clang-format on
-  return i;
-}
-
-[[nodiscard]] static constexpr auto ImageSize(const int w, const int h) noexcept -> size_t
-{
-  if (!(w > 0 && h > 0)) { return 0; }
-  return static_cast<size_t>(w) * static_cast<size_t>(h);
-}
-
-[[nodiscard]] static constexpr auto PixelDataOffset(const size_t image_size,
-  const size_t channel_index) noexcept -> size_t
-{
-  return image_size * channel_index;
-}
-
 namespace {
 
 struct SeekEntry
@@ -281,31 +254,6 @@ struct SeekTable
 
 namespace ilp_movie {
 
-[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(const DemuxFrame &f, Channel ch) noexcept
-  -> PixelData<const float>
-{
-  const size_t image_size = ImageSize(f.width, f.height);
-  if (image_size == 0) { return {}; }
-  const size_t ch_index = ChannelIndex(ch);
-  if (ch_index == kBadChannelIndex) { return {}; }
-  const size_t p_offset = PixelDataOffset(image_size, ch_index);
-  if (!(p_offset < f.buf.size())) { return {}; }
-  return { /*.data=*/&(f.buf[p_offset]), /*.count=*/image_size };
-}
-
-[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(DemuxFrame *const f, Channel ch) noexcept
-  -> PixelData<float>
-{
-  assert(f != nullptr);// NOLINT
-  const size_t image_size = ImageSize(f->width, f->height);
-  if (image_size == 0) { return {}; }
-  const size_t ch_index = ChannelIndex(ch);
-  if (ch_index == kBadChannelIndex) { return {}; }
-  const size_t p_offset = PixelDataOffset(image_size, ch_index);
-  if (!(p_offset < f->buf.size())) { return {}; }
-  return { /*.data=*/&(f->buf[p_offset]), /*.count=*/image_size };
-}
-
 struct DemuxImpl
 {
   AVFormatContext *ifmt_ctx = nullptr;
@@ -322,7 +270,7 @@ struct DemuxImpl
   SeekTable seek_table = {};
 };
 
-[[nodiscard]] ILP_MOVIE_EXPORT auto MakeDemuxContext(const DemuxParams &params/*,
+auto MakeDemuxContext(const DemuxParams &params/*,
   DemuxFrame *first_frame*/) noexcept -> std::unique_ptr<DemuxContext>
 {
   if (params.filename == nullptr) {
@@ -336,8 +284,9 @@ struct DemuxImpl
 
   // Allocate the implementation specific data. The deleter will be invoked if we leave this
   // function before moving the implementation to the context.
-  auto impl = demux_impl_ptr(new DemuxImpl(), [](DemuxImpl *impl_ptr) {
+  auto impl = demux_impl_ptr(new DemuxImpl(), [](DemuxImpl *impl_ptr) noexcept {
     LogMsg(LogLevel::kInfo, "Free demux implementation\n");
+    assert(impl_ptr != nullptr); // NOLINT
 
     avfilter_graph_free(&(impl_ptr->filter_graph));
     avcodec_free_context(&(impl_ptr->dec_ctx));
@@ -440,13 +389,18 @@ auto DemuxSeek(const DemuxContext &demux_ctx, const int frame_pos, DemuxFrame *c
   frame->height = impl->dec_ctx->height;
   frame->pixel_aspect_ratio = 1.0;
   frame->pix_fmt = pix_fmt;
-  frame->buf.resize(ChannelCount(pix_fmt) * static_cast<size_t>(impl->dec_ctx->width)
-                      * static_cast<size_t>(impl->dec_ctx->height),
-    0.F);
-  const auto r = ChannelData(frame, Channel::kRed);
-  const auto g = ChannelData(frame, Channel::kGreen);
-  const auto b = ChannelData(frame, Channel::kBlue);
-  const auto a = ChannelData(frame, Channel::kAlpha);
+  frame->buf.count =
+    ChannelCount(pix_fmt) * static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height);
+  frame->buf.data = std::make_unique<float[]>(frame->buf.count);// NOLINT
+
+  const auto r = ChannelData(
+    frame->width, frame->height, Channel::kRed, frame->buf.data.get(), frame->buf.count);
+  const auto g = ChannelData(
+    frame->width, frame->height, Channel::kGreen, frame->buf.data.get(), frame->buf.count);
+  const auto b = ChannelData(
+    frame->width, frame->height, Channel::kBlue, frame->buf.data.get(), frame->buf.count);
+  const auto a = ChannelData(
+    frame->width, frame->height, Channel::kAlpha, frame->buf.data.get(), frame->buf.count);
   for (int y = 0; y < frame->height; ++y) {
     for (int x = 0; x < frame->width; ++x) {
       const auto i =

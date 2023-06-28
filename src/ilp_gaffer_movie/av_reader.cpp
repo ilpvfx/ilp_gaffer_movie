@@ -20,6 +20,7 @@
 
 #include <ilp_movie/demux.hpp>
 #include <ilp_movie/log.hpp>
+#include <ilp_movie/pixel_data.hpp>
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::AvReader);
 
@@ -631,29 +632,37 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   auto &tile = tileData->writable();
 
   const auto *f = frame->_frame.get();
-  ilp_movie::PixelData ch = {};
+  ilp_movie::PixelData<float> ch = {};
   switch (frame->_frame->pix_fmt) {
   case ilp_movie::PixelFormat::kGray:
-    ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
+    ch = ilp_movie::ChannelData(
+      f->width, f->height, ilp_movie::Channel::kRed, f->buf.data.get(), f->buf.count);
     break;
   case ilp_movie::PixelFormat::kRGB:
     if (channelName == GafferImage::ImageAlgo::channelNameR) {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kRed, f->buf.data.get(), f->buf.count);
     } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kGreen, f->buf.data.get(), f->buf.count);
     } else {// channelName == GafferImage::ImageAlgo::channelNameB
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kBlue, f->buf.data.get(), f->buf.count);
     }
     break;
   case ilp_movie::PixelFormat::kRGBA:
     if (channelName == GafferImage::ImageAlgo::channelNameR) {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kRed);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kRed, f->buf.data.get(), f->buf.count);
     } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kGreen);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kGreen, f->buf.data.get(), f->buf.count);
     } else if (channelName == GafferImage::ImageAlgo::channelNameB) {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kBlue);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kBlue, f->buf.data.get(), f->buf.count);
     } else {
-      ch = ilp_movie::ChannelData(*f, ilp_movie::Channel::kAlpha);
+      ch = ilp_movie::ChannelData(
+        f->width, f->height, ilp_movie::Channel::kAlpha, f->buf.data.get(), f->buf.count);
     }
     break;
   case ilp_movie::PixelFormat::kNone:

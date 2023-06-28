@@ -18,6 +18,7 @@ extern "C" {
 #include <ilp_movie/demux.hpp>
 #include <ilp_movie/log.hpp>
 #include <ilp_movie/mux.hpp>
+#include <ilp_movie/pixel_data.hpp>
 
 #if 0
 namespace fas {
@@ -367,10 +368,11 @@ struct FramePair
   frames->demux_frame.frame_index = frame_nb;
   frames->demux_frame.pixel_aspect_ratio = 1.0;
   frames->demux_frame.pix_fmt = pix_fmt;
-  frames->demux_frame.buf.resize(ilp_movie::ChannelCount(pix_fmt)
-                                   * static_cast<std::size_t>(frames->demux_frame.width)
-                                   * static_cast<std::size_t>(frames->demux_frame.height),
-    0.F);
+  frames->demux_frame.buf.count = ilp_movie::ChannelCount(pix_fmt)
+                                  * static_cast<std::size_t>(frames->demux_frame.width)
+                                  * static_cast<std::size_t>(frames->demux_frame.height);
+  frames->demux_frame.buf.data = std::make_unique<float[]>(frames->demux_frame.buf.count);// NOLINT
+
   const auto r = ilp_movie::ChannelData(&(frames->demux_frame), ilp_movie::Channel::kRed);
   const auto g = ilp_movie::ChannelData(&(frames->demux_frame), ilp_movie::Channel::kGreen);
   const auto b = ilp_movie::ChannelData(&(frames->demux_frame), ilp_movie::Channel::kBlue);
@@ -428,12 +430,30 @@ struct FramePair
   frames->mux_frame.width = frames->demux_frame.width;
   frames->mux_frame.height = frames->demux_frame.height;
   frames->mux_frame.frame_nb = static_cast<float>(frames->demux_frame.frame_index);
-  frames->mux_frame.r = ilp_movie::ChannelData(frames->demux_frame, ilp_movie::Channel::kRed).data;
-  frames->mux_frame.g =
-    ilp_movie::ChannelData(frames->demux_frame, ilp_movie::Channel::kGreen).data;
-  frames->mux_frame.b = ilp_movie::ChannelData(frames->demux_frame, ilp_movie::Channel::kBlue).data;
-  frames->mux_frame.a =
-    ilp_movie::ChannelData(frames->demux_frame, ilp_movie::Channel::kAlpha).data;
+  frames->mux_frame.r = ilp_movie::ChannelData(frames->demux_frame.width,
+    frames->demux_frame.height,
+    ilp_movie::Channel::kRed,
+    frames->demux_frame.buf.data.get(),
+    frames->demux_frame.buf.count)
+                          .data;
+  frames->mux_frame.g = ilp_movie::ChannelData(frames->demux_frame.width,
+    frames->demux_frame.height,
+    ilp_movie::Channel::kGreen,
+    frames->demux_frame.buf.data.get(),
+    frames->demux_frame.buf.count)
+                          .data;
+  frames->mux_frame.b = ilp_movie::ChannelData(frames->demux_frame.width,
+    frames->demux_frame.height,
+    ilp_movie::Channel::kBlue,
+    frames->demux_frame.buf.data.get(),
+    frames->demux_frame.buf.count)
+                          .data;
+  frames->mux_frame.a = ilp_movie::ChannelData(frames->demux_frame.width,
+    frames->demux_frame.height,
+    ilp_movie::Channel::kAlpha,
+    frames->demux_frame.buf.data.get(),
+    frames->demux_frame.buf.count)
+                          .data;
 
   return true;
 }
@@ -442,7 +462,7 @@ namespace {
 
 TEST_CASE("test")
 {
-  std::vector<std::string> log_lines;
+  std::vector<std::string> log_lines = {};
   ilp_movie::SetLogCallback(
     [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
@@ -456,31 +476,23 @@ TEST_CASE("test")
     return cond;
   };
 
-  const auto init_mux = [&](ilp_movie::MuxContext *mux_ctx) {
-    REQUIRE(dump_log_on_fail(mux_ctx->impl == nullptr));
-    REQUIRE(dump_log_on_fail(ilp_movie::MuxInit(mux_ctx)));
-    REQUIRE(dump_log_on_fail(mux_ctx->impl != nullptr));
-  };
   const auto write_frames = [&](const ilp_movie::MuxContext &mux_ctx, const int frame_count) {
     REQUIRE(dump_log_on_fail(frame_count > 0));
 
     for (int i = 0; i < frame_count; ++i) {
       FramePair f = {};
-      REQUIRE(dump_log_on_fail(
-        MakeFramePair(mux_ctx.width, mux_ctx.height, i, ilp_movie::PixelFormat::kRGB, &f)));
+      REQUIRE(dump_log_on_fail(MakeFramePair(
+        mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixelFormat::kRGB, &f)));
       REQUIRE(dump_log_on_fail(ilp_movie::MuxWriteFrame(mux_ctx, f.mux_frame)));
     }
     REQUIRE(dump_log_on_fail(ilp_movie::MuxFinish(mux_ctx)));
   };
-  const auto free_mux = [&](ilp_movie::MuxContext *mux_ctx) {
-    REQUIRE(dump_log_on_fail(mux_ctx->impl != nullptr));
-    ilp_movie::MuxFree(mux_ctx);
-    REQUIRE(dump_log_on_fail(mux_ctx->impl == nullptr));
-  };
 
   const auto seek_frames = [&](const ilp_movie::DemuxContext &demux_ctx, const int frame_count) {
+    REQUIRE(frame_count > 0);
+    
     std::vector<int> frame_range(static_cast<std::size_t>(frame_count));
-    std::iota(std::begin(frame_range), std::end(frame_range), 1);    
+    std::iota(std::begin(frame_range), std::end(frame_range), 1);
     auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
     std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
 
@@ -492,31 +504,31 @@ TEST_CASE("test")
       REQUIRE(dump_log_on_fail(
         MakeFramePair(frame.width, frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &f)));
 
-      const auto r = ilp_movie::ChannelData(frame, ilp_movie::Channel::kRed);
+      const auto r = ilp_movie::ChannelData(
+        frame.width, frame.height, ilp_movie::Channel::kRed, frame.buf.data.get(), frame.buf.count);
       for (std::size_t i = 0; i < r.count; ++i) {
-        //REQUIRE(r.data[i] == f.mux_frame.r[i]);// NOLINT
+        // REQUIRE(r.data[i] == f.mux_frame.r[i]);// NOLINT
       }
 
       // const auto g = ilp_movie::ChannelData(frame, ilp_movie::Channel::kGreen);
       // const auto b = ilp_movie::ChannelData(frame, ilp_movie::Channel::kBlue);
-
     }
-
   };
 
   const char *const kFilename = "/tmp/test_data/demux.mov";
   constexpr int kFrameCount = 200;
 
   // Write/mux
-  ilp_movie::MuxContext mux_ctx = {};
-  mux_ctx.filename = kFilename;
-  mux_ctx.codec_name = "prores_ks";
+  ilp_movie::MuxParams mux_params = {};
+  mux_params.filename = kFilename;
+  mux_params.codec_name = "prores_ks";
   // mux_ctx.color_range = "tv";
-  mux_ctx.width = 512;
-  mux_ctx.height = 512;
-  init_mux(&mux_ctx);
-  write_frames(mux_ctx, kFrameCount);
-  free_mux(&mux_ctx);
+  mux_params.width = 512;
+  mux_params.height = 512;
+  auto mux_ctx = ilp_movie::MakeMuxContext(mux_params);
+  REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+  write_frames(*mux_ctx, kFrameCount);
+  mux_ctx.reset();
 
   std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -530,10 +542,6 @@ TEST_CASE("test")
   REQUIRE(dump_log_on_fail(demux_ctx != nullptr));
   seek_frames(*demux_ctx, kFrameCount);
   demux_ctx.reset();
-
-  // Check that the test doesn't leak resources.
-  REQUIRE(dump_log_on_fail(mux_ctx.impl == nullptr));
-  //REQUIRE(dump_log_on_fail(demux_ctx.impl == nullptr));
 
   dump_log_on_fail(false);// TMP!!
 }

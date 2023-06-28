@@ -263,16 +263,16 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     IECore::msg(iec_level, "MovieWriter", str);
   });
 
-  bool mux_init = false;
-  ilp_movie::MuxContext mux_ctx = {};
-  mux_ctx.filename = filename.c_str();
-  mux_ctx.fps = static_cast<double>(context->getFramesPerSecond());
-  mux_ctx.mp4_metadata.color_range = color_range.c_str();
-  mux_ctx.mp4_metadata.colorspace = colorspace.c_str();
-  mux_ctx.mp4_metadata.color_primaries = color_primaries.c_str();
-  mux_ctx.mp4_metadata.color_trc = color_trc.c_str();
-  mux_ctx.sws_flags = sws_flags.c_str();
-  mux_ctx.filtergraph = filtergraph.c_str();
+  ilp_movie::MuxParams mux_params = {};
+  mux_params.filename = filename.c_str();
+  mux_params.fps = static_cast<double>(context->getFramesPerSecond());
+  mux_params.mp4_metadata.color_range = color_range.c_str();
+  mux_params.mp4_metadata.colorspace = colorspace.c_str();
+  mux_params.mp4_metadata.color_primaries = color_primaries.c_str();
+  mux_params.mp4_metadata.color_trc = color_trc.c_str();
+  mux_params.sws_flags = sws_flags.c_str();
+  mux_params.filtergraph = filtergraph.c_str();
+  std::unique_ptr<ilp_movie::MuxContext> mux_ctx = nullptr;
 
   if (codec == "h264") {
     preset = codec_settings->getChild<StringPlug>("preset")->getValue();
@@ -283,13 +283,13 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     ilp_movie::h264::Config cfg = {};
     cfg.preset = preset.c_str();
     cfg.pix_fmt = pix_fmt.c_str();
-    if (tune != "none") { mux_ctx.h264.cfg.tune = tune.c_str(); }
-    mux_ctx.h264.cfg.crf = codec_settings->getChild<IntPlug>("crf")->getValue();
-    mux_ctx.h264.cfg.x264_params = x264_params.c_str();
+    if (tune != "none") { mux_params.h264.cfg.tune = tune.c_str(); }
+    mux_params.h264.cfg.crf = codec_settings->getChild<IntPlug>("crf")->getValue();
+    mux_params.h264.cfg.x264_params = x264_params.c_str();
     //mux_ctx.h264.qp = codec_settings->getChild<IntPlug>("qp")->getValue();
 
-    mux_ctx.codec_name = "libx264";
-    mux_ctx.h264.cfg = cfg;
+    mux_params.codec_name = "libx264";
+    mux_params.h264.cfg = cfg;
   } else if (codec == "prores") {
     // clang-format off
     ilp_movie::ProRes::Config cfg = {};
@@ -305,8 +305,8 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
 
     cfg.qscale = codec_settings->getChild<IntPlug>("qscale")->getValue();
 
-    mux_ctx.codec_name = "prores_ks";
-    mux_ctx.pro_res.cfg = cfg;
+    mux_params.codec_name = "prores_ks";
+    mux_params.pro_res.cfg = cfg;
   } else {
     throw IECore::Exception("Unsupported codec");
   }
@@ -323,34 +323,31 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     context->setFrame(frame);
     const auto img_ptr = ImageAlgo::image(img);
 
-    if (!mux_init) {
-      mux_ctx.width = img_ptr->getDisplayWindow().size().x + 1;
-      mux_ctx.height = img_ptr->getDisplayWindow().size().y + 1;
-      if (!MuxInit(&mux_ctx)) { throw IECore::Exception("Mux init failed"); }
-      mux_init = true;
+    if (mux_ctx == nullptr) {
+      mux_params.width = img_ptr->getDisplayWindow().size().x + 1;
+      mux_params.height = img_ptr->getDisplayWindow().size().y + 1;
+      mux_ctx = ilp_movie::MakeMuxContext(mux_params);
+      if (mux_ctx == nullptr) { throw IECore::Exception("Mux init failed"); }
     }
 
     // TODO(tohi): Only send pixels in display window?
 
     // Pass a frame to the muxer.
     ilp_movie::MuxFrame mux_frame = {};
-    mux_frame.width = mux_ctx.width;
-    mux_frame.height = mux_ctx.height;
+    mux_frame.width = mux_ctx->params.width;
+    mux_frame.height = mux_ctx->params.height;
     mux_frame.frame_nb = frame;
     mux_frame.r = img_ptr->getChannel<float>("R")->readable().data();
     mux_frame.g = img_ptr->getChannel<float>("G")->readable().data();
     mux_frame.b = img_ptr->getChannel<float>("B")->readable().data();
-    if (!MuxWriteFrame(mux_ctx, mux_frame)) {
-      MuxFree(&mux_ctx);
+    if (!ilp_movie::MuxWriteFrame(*mux_ctx, mux_frame)) {
       throw IECore::Exception("Mux write frame failed");
     }
   }
 
-  if (!MuxFinish(mux_ctx)) {
-    MuxFree(&mux_ctx);
+  if (!ilp_movie::MuxFinish(*mux_ctx)) {
     throw IECore::Exception("Mux finish failed");
   }
-  MuxFree(&mux_ctx);
 
 #if 0
     ConstCompoundDataPtr sets;
