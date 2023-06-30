@@ -208,7 +208,8 @@ namespace h264 {
 struct MuxImpl;
 using mux_impl_ptr = std::unique_ptr<MuxImpl, std::function<void(MuxImpl *)>>;
 
-struct MuxParams {
+struct MuxParameters
+{
   // The filename cannot be null.
   // If format_name is null the output format is guessed according to the file extension.
   const char *filename = nullptr;
@@ -256,7 +257,7 @@ struct MuxParams {
 //
 struct MuxContext
 {
-  MuxParams params = {};
+  MuxParameters params = {};
 
   // Private implementation specific data stored as an opaque pointer.
   // The implementation specific data contains low-level resources such as
@@ -283,7 +284,8 @@ struct MuxFrame
 };
 
 // Initialize the internal resources required to start encoding video frames.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxContext(const MuxParams &params) noexcept -> std::unique_ptr<MuxContext>;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxContext(const MuxParameters &params) noexcept
+  -> std::unique_ptr<MuxContext>;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.

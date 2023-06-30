@@ -19,11 +19,10 @@ namespace log_utils_internal {
 // Typically, the message string will not end with a newline character since
 // one is automatically added to the final message that is built internally.
 ILP_MOVIE_NO_EXPORT
-void LogAvError(const char *msg, const int errnum = 0) noexcept;
-
+void LogAvError(const char *msg, int errnum = 0, int log_level = ilp_movie::LogLevel::kError) noexcept;
 
 ILP_MOVIE_NO_EXPORT void LogPacket(const AVFormatContext *fmt_ctx,
   const AVPacket *pkt,
-  const int log_level = ilp_movie::LogLevel::kTrace) noexcept;
+  int log_level = ilp_movie::LogLevel::kTrace) noexcept;
 
 }// namespace log_utils_internal

@@ -296,7 +296,7 @@ static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) noexc
 
 namespace ilp_movie {
 
-auto MakeMuxContext(const MuxParams &params) noexcept -> std::unique_ptr<MuxContext>
+auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<MuxContext>
 {
   if (params.filename == nullptr) {
     LogMsg(LogLevel::kError, "Empty filename\n");
@@ -471,7 +471,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
   // Create a frame and fill in the pixel data from the given mux frame.
   AVFrame *dec_frame = av_frame_alloc();
   if (dec_frame == nullptr) {
-    LogMsg(LogLevel::kError, "Could not allocate decode frame\n");
+    LogMsg(LogLevel::kError, "Cannot allocate decode frame\n");
     return false;
   }
   dec_frame->format = AV_PIX_FMT_GBRPF32;
@@ -479,7 +479,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
   dec_frame->height = mux_frame.height;
   dec_frame->pts = static_cast<int64_t>(mux_frame.frame_nb);
   if (const int ret = av_frame_get_buffer(dec_frame, /*align=*/0); ret < 0) {
-    log_utils_internal::LogAvError("Could not allocate decode frame buffer", ret);
+    log_utils_internal::LogAvError("Cannot allocate decode frame buffer", ret);
     return false;
   }
 

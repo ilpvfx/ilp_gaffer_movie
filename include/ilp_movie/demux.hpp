@@ -38,6 +38,7 @@ struct DemuxFrame
   int width = -1;
   int height = -1;
   int frame_index = -1;
+  bool key_frame = false;
   double pixel_aspect_ratio = -1.0;
 
   PixelFormat pix_fmt = PixelFormat::kNone;

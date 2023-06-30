@@ -1,9 +1,8 @@
 #include <algorithm>// std::shuffle
-#include <chrono>
 #include <iostream>// std::cout, std::cerr
 #include <random>// std::default_random_engine
+#include <sstream>// std::ostringstream
 #include <string>// std::string
-#include <thread>
 #include <vector>// std::vector
 
 // clang-format off
@@ -409,7 +408,7 @@ struct FramePair
         } else {
           r.data[i] = d * norm;// NOLINT
         }
-        g.data[i] = 0.F;// NOLINT
+        g.data[i] = std::clamp(static_cast<float>(frame_nb) / 200, 0.F, 1.F);// NOLINT
         break;
       case ilp_movie::PixelFormat::kRGBA:
         if (d < 0) {
@@ -417,7 +416,7 @@ struct FramePair
         } else {
           g.data[i] = d * norm;// NOLINT
         }
-        b.data[i] = 0.F;// NOLINT
+        b.data[i] = std::clamp(static_cast<float>(frame_nb) / 200, 0.F, 1.F);// NOLINT
         a.data[i] = (d < 0) ? 1.F : 0.F;// NOLINT
         break;
       case ilp_movie::PixelFormat::kNone:
@@ -490,47 +489,100 @@ TEST_CASE("test")
 
   const auto seek_frames = [&](const ilp_movie::DemuxContext &demux_ctx, const int frame_count) {
     REQUIRE(frame_count > 0);
-    
-    std::vector<int> frame_range(static_cast<std::size_t>(frame_count));
-    std::iota(std::begin(frame_range), std::end(frame_range), 1);
+
+#if 0
+    std::vector<int> frame_range;
+    frame_range.push_back(80);
+#else
+    std::vector<int> frame_range(static_cast<std::size_t>(frame_count - 1));
+    std::iota(std::begin(frame_range), std::end(frame_range), 0);
     auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
     std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
+#endif
 
     for (const auto frame_nb : frame_range) {
-      ilp_movie::DemuxFrame frame = {};
-      REQUIRE(dump_log_on_fail(ilp_movie::DemuxSeek(demux_ctx, frame_nb, &frame)));
+      ilp_movie::DemuxFrame seek_frame = {};
+      REQUIRE(dump_log_on_fail(ilp_movie::DemuxSeek(demux_ctx, frame_nb, &seek_frame)));
+      REQUIRE(seek_frame.frame_index == frame_nb);
+      REQUIRE(seek_frame.key_frame);// ProRes is all intraframe, so all key frames!
 
       FramePair f = {};
-      REQUIRE(dump_log_on_fail(
-        MakeFramePair(frame.width, frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &f)));
+      REQUIRE(MakeFramePair(
+        seek_frame.width, seek_frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &f));
 
-      const auto r = ilp_movie::ChannelData(
-        frame.width, frame.height, ilp_movie::Channel::kRed, frame.buf.data.get(), frame.buf.count);
+      const auto r = ilp_movie::ChannelData(seek_frame.width,
+        seek_frame.height,
+        ilp_movie::Channel::kRed,
+        seek_frame.buf.data.get(),
+        seek_frame.buf.count);
+      const auto g = ilp_movie::ChannelData(seek_frame.width,
+        seek_frame.height,
+        ilp_movie::Channel::kGreen,
+        seek_frame.buf.data.get(),
+        seek_frame.buf.count);
+      const auto b = ilp_movie::ChannelData(seek_frame.width,
+        seek_frame.height,
+        ilp_movie::Channel::kBlue,
+        seek_frame.buf.data.get(),
+        seek_frame.buf.count);
+      float r_max_err = std::numeric_limits<float>::lowest();
+      float g_max_err = std::numeric_limits<float>::lowest();
+      float b_max_err = std::numeric_limits<float>::lowest();
+      float r_avg_err = 0.F;
+      float g_avg_err = 0.F;
+      float b_avg_err = 0.F;
       for (std::size_t i = 0; i < r.count; ++i) {
-        // REQUIRE(r.data[i] == f.mux_frame.r[i]);// NOLINT
+        const float err = std::abs(r.data[i] - f.mux_frame.r[i]);// NOLINT
+        r_avg_err += err;
+        r_max_err = std::max(err, r_max_err);
+      }
+      r_avg_err /= static_cast<float>(r.count);
+      for (std::size_t i = 0; i < g.count; ++i) {
+        const float err = std::abs(g.data[i] - f.mux_frame.g[i]);// NOLINT
+        g_avg_err += err;
+        g_max_err = std::max(err, g_max_err);
+      }
+      g_avg_err /= static_cast<float>(g.count);
+      for (std::size_t i = 0; i < b.count; ++i) {
+        const float err = std::abs(b.data[i] - f.mux_frame.b[i]);// NOLINT
+        b_avg_err += err;
+        b_max_err = std::max(err, b_max_err);
+      }
+      b_avg_err /= static_cast<float>(b.count);
+
+      {
+        std::ostringstream oss;
+        oss << "Frame " << frame_nb << "\n"
+            << "r | avg: " << r_avg_err << ", max: " << r_max_err << "\n"
+            << "g | avg: " << g_avg_err << ", max: " << g_max_err << "\n"
+            << "b | avg: " << b_avg_err << ", max: " << b_max_err << "\n";
+        ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
       }
 
-      // const auto g = ilp_movie::ChannelData(frame, ilp_movie::Channel::kGreen);
-      // const auto b = ilp_movie::ChannelData(frame, ilp_movie::Channel::kBlue);
+      REQUIRE((0.F <= r_avg_err && r_avg_err < 0.25F));// NOLINT
+      REQUIRE((0.F <= g_avg_err && g_avg_err < 0.25F));// NOLINT
+      REQUIRE((0.F <= b_avg_err && b_avg_err < 0.25F));// NOLINT
+      REQUIRE((0.F <= r_max_err && r_max_err < 0.25F));// NOLINT
+      REQUIRE((0.F <= g_max_err && g_max_err < 0.25F));// NOLINT
+      REQUIRE((0.F <= b_max_err && b_max_err < 0.25F));// NOLINT
     }
   };
 
-  const char *const kFilename = "/tmp/test_data/demux.mov";
+  const char *const kFilename = "/tmp/test_data/demux_test.mov";
   constexpr int kFrameCount = 200;
 
   // Write/mux
-  ilp_movie::MuxParams mux_params = {};
+  ilp_movie::MuxParameters mux_params = {};
   mux_params.filename = kFilename;
   mux_params.codec_name = "prores_ks";
-  // mux_ctx.color_range = "tv";
+  // mux_params.
+  //  mux_ctx.color_range = "tv";
   mux_params.width = 512;
   mux_params.height = 512;
   auto mux_ctx = ilp_movie::MakeMuxContext(mux_params);
   REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
   write_frames(*mux_ctx, kFrameCount);
   mux_ctx.reset();
-
-  std::this_thread::sleep_for(std::chrono::seconds(2));
 
   // Read/demux
   ilp_movie::DemuxParams demux_params = {};
@@ -540,7 +592,9 @@ TEST_CASE("test")
   demux_params.pix_fmt = ilp_movie::PixelFormat::kRGB;
   auto demux_ctx = ilp_movie::MakeDemuxContext(demux_params);
   REQUIRE(dump_log_on_fail(demux_ctx != nullptr));
+
   seek_frames(*demux_ctx, kFrameCount);
+
   demux_ctx.reset();
 
   dump_log_on_fail(false);// TMP!!

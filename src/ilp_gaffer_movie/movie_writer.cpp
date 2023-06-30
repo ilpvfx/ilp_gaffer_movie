@@ -263,7 +263,7 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     IECore::msg(iec_level, "MovieWriter", str);
   });
 
-  ilp_movie::MuxParams mux_params = {};
+  ilp_movie::MuxParameters mux_params = {};
   mux_params.filename = filename.c_str();
   mux_params.fps = static_cast<double>(context->getFramesPerSecond());
   mux_params.mp4_metadata.color_range = color_range.c_str();

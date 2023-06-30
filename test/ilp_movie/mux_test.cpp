@@ -58,7 +58,7 @@ TEST_CASE("h264")
 
   // Create a mux context with as many default settings as possible (i.e. minimal config) that
   // should be valid.
-  ilp_movie::MuxParams mux_params = {};
+  ilp_movie::MuxParameters mux_params = {};
   mux_params.codec_name = "libx264";
   mux_params.width = 128;
   mux_params.height = 128;
@@ -187,7 +187,7 @@ TEST_CASE("ProRes")
 
   // Create a mux context with as many default settings as possible (i.e. minimal config) that
   // should be valid.
-  ilp_movie::MuxParams mux_params = {};
+  ilp_movie::MuxParameters mux_params = {};
   mux_params.codec_name = "prores_ks";
   mux_params.width = 128;
   mux_params.height = 128;
