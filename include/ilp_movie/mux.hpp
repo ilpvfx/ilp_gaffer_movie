@@ -257,6 +257,7 @@ struct MuxParameters
 //
 struct MuxContext
 {
+  // A copy of the parameters used to create the context.
   MuxParameters params = {};
 
   // Private implementation specific data stored as an opaque pointer.

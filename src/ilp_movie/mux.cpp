@@ -199,8 +199,7 @@ struct MuxImpl
   if (!(enc_ctx != nullptr && qscale >= 0)) { return false; }
 
   // From ffmpeg source code.
-  // NOLINTNEXTLINE
-  enc_ctx->flags |= AV_CODEC_FLAG_QSCALE;
+  enc_ctx->flags |= AV_CODEC_FLAG_QSCALE;// NOLINT
   enc_ctx->global_quality = FF_QP2LAMBDA * qscale;
   return true;
 }

@@ -16,6 +16,12 @@ template<typename PixelT = const float> struct PixelData
   std::size_t count = 0U;// Number of elements.
 };
 
+template<typename PixelT>
+[[nodiscard]] ILP_MOVIE_EXPORT constexpr auto Empty(const PixelData<PixelT> &p) noexcept -> bool
+{
+  return p.data == nullptr || p.count == 0;
+}
+
 [[nodiscard]] ILP_MOVIE_EXPORT auto
   ChannelData(int w, int h, Channel ch, const float *buf, std::size_t buf_count) noexcept
   -> PixelData<const float>;
@@ -29,11 +35,5 @@ template<typename PixelT = const float> struct PixelData
 
 [[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(DemuxFrame *f, Channel ch) noexcept
   -> PixelData<float>;
-
-template<typename PixelT>
-[[nodiscard]] ILP_MOVIE_EXPORT constexpr auto Empty(const PixelData<PixelT> &p) noexcept -> bool
-{
-  return p.data == nullptr || p.count == 0;
-}
 
 }// namespace ilp_movie

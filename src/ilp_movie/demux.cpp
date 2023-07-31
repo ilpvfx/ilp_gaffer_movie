@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>// std::memcpy
 #include <sstream>// TMP!!
+#include <type_traits>// std::is_same_v
 #include <vector>// std::vector
 
 // clang-format off
@@ -29,6 +30,60 @@ extern "C" {
 #include <internal/dict_utils.hpp>
 #include <internal/filter_graph.hpp>
 #include <internal/log_utils.hpp>
+#include <internal/timestamp.hpp>
+
+static_assert(std::is_same_v<std::int64_t, int64_t>);
+
+namespace {
+constexpr struct
+{
+  bool enabled = true;
+  int log_level = ilp_movie::LogLevel::kInfo;
+} kTrace = {};
+
+// clang-format off
+template<typename T> struct dependent_false : std::false_type {};
+// clang-format on
+
+template<typename ResourceT> class RefHolder
+{
+public:
+  static_assert(std::is_same_v<ResourceT, AVPacket> || std::is_same_v<ResourceT, AVFrame>);
+
+  explicit RefHolder(ResourceT *const ptr) noexcept : _ptr(ptr) {}
+  RefHolder(const RefHolder &) noexcept = delete;
+  RefHolder(RefHolder &&) noexcept = delete;
+  RefHolder &operator=(const RefHolder &) noexcept = delete;
+  RefHolder &operator=(RefHolder &&) noexcept = delete;
+
+  ~RefHolder() noexcept { unref(); }
+
+  [[nodiscard]] auto get() const noexcept -> ResourceT * { return _ptr; }
+
+  void unref() noexcept
+  {
+    if (_ptr != nullptr && !_released) {
+      if constexpr (std::is_same_v<ResourceT, AVPacket>) {
+        av_packet_unref(_ptr);
+        _released = true;
+      } else if constexpr (std::is_same_v<ResourceT, AVFrame>) {
+        av_frame_unref(_ptr);
+        _released = true;
+      } else {
+        static_assert(dependent_false<ResourceT>::value);
+      }
+    }
+  }
+
+private:
+  ResourceT *_ptr = nullptr;
+  bool _released = false;
+};
+
+using PacketRefHolder = RefHolder<AVPacket>;
+using FrameRefHolder = RefHolder<AVFrame>;
+
+}// namespace
 
 [[nodiscard]] static auto OpenInputFile(const char *const filename,
   AVFormatContext **ifmt_ctx,
@@ -86,8 +141,14 @@ extern "C" {
   if (const int ret =
         avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[stream_index]->codecpar);// NOLINT
       ret < 0) {
-    log_utils_internal::LogAvError("Cannot copy decoder parameters to the input stream", ret);
+    log_utils_internal::LogAvError("Cannot copy stream parameters to the decoder", ret);
     return false;
+  }
+
+  if constexpr (kTrace.enabled) {
+    std::ostringstream oss;
+    oss << "color_range: " << av_color_range_name(codec_ctx->color_range) << "\n";
+    ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
   }
 
   // Init the video decoder.
@@ -105,118 +166,250 @@ extern "C" {
   return true;
 }
 
-#if 0
-[[nodiscard]] static auto ReadFrame(AVFormatContext *ifmt_ctx,
-  AVCodecContext *dec_ctx,
-  AVFilterContext *buffersrc_ctx,
-  AVFilterContext *buffersink_ctx,
-  AVPacket *pkt,
-  AVFrame *dec_frame,
-  AVFrame *filt_frame,
+template<typename FilterFuncT>
+[[nodiscard]] static auto SeekFrame(AVFormatContext *const fmt_ctx,
+  AVCodecContext *const dec_ctx,
+  AVPacket *const dec_pkt,
+  AVFrame *const dec_frame,
   const int video_stream_index,
-  ilp_movie::DemuxFrame *demux_frame) noexcept -> bool
+  const int64_t frame_index,
+  FilterFuncT &&filter_func) noexcept -> bool
 {
-  bool got_frame = false;
-  int ret = 0;
-  while (!got_frame /* && ret >= 0*/) {
-    // Read a packet from the file.
-    if (ret = av_read_frame(ifmt_ctx, pkt); ret < 0) {
-      ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot read packet\n");
-      break;
+  assert(0 <= video_stream_index// NOLINT
+         && video_stream_index < static_cast<int>(fmt_ctx->nb_streams));
+  const AVStream *video_stream = fmt_ctx->streams[video_stream_index];// NOLINT
+  assert(video_stream != nullptr);// NOLINT
+
+  // Seek is done on frame pts.
+  // NOTE: Frame index is zero-based.
+  const int64_t target_pts = timestamp_internal::FrameIndexToTimestamp(frame_index,
+    video_stream->r_frame_rate,
+    video_stream->time_base,
+    video_stream->start_time != AV_NOPTS_VALUE ? video_stream->start_time : 0);
+
+  if constexpr (kTrace.enabled) {
+    {
+      std::ostringstream oss;
+      oss << "Stream | nb_frames: " << video_stream->nb_frames
+          << ", frame_rate: " << video_stream->r_frame_rate.num << "/"
+          << video_stream->r_frame_rate.den << ", start_time: " << video_stream->start_time
+          << ", time_base: " << video_stream->time_base.num << "/" << video_stream->time_base.den
+          << "\n";
+      ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
     }
-
-    log_utils_internal::LogPacket(ifmt_ctx, pkt, ilp_movie::LogLevel::kInfo);
-
-    if (pkt->stream_index == video_stream_index) {
-      // Send the packet to the decoder.
-      if (ret = avcodec_send_packet(dec_ctx, pkt); ret < 0) {
-        log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
-        break;
-      }
-
-      while (ret >= 0) {
-        ret = avcodec_receive_frame(dec_ctx, dec_frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
-          // AVERROR(EAGAIN): Output is not available in this state.
-          // AVERROR_EOF: Decoder fully flushed, there will be no more output frames.
-          break;
-        } else if (ret < 0) {
-          log_utils_internal::LogAvError("Cannot receive frame from the decoder", ret);
-          goto end;
-        }
-
-        dec_frame->pts = dec_frame->best_effort_timestamp;
-
-        // Push the decoded frame into the filter graph.
-        if (ret =
-              av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
-            ret < 0) {
-          log_utils_internal::LogAvError("Cannot push decoded frame to the filter graph", ret);
-          goto end;
-        }
-
-        // Pull filtered frames from the filter graph.
-        // while (!got_frame) {
-        while (ret >= 0) {
-          ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
-          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
-            break;
-          }
-          if (ret < 0) { goto end; }
-
-          //
-          // ProcessFrame(frame)
-          // ...
-          //
-          if (filt_frame->format == AV_PIX_FMT_GBRPF32) {
-            demux_frame->width = filt_frame->width;
-            demux_frame->height = filt_frame->height;
-            demux_frame->buf.count =
-              3 * static_cast<size_t>(demux_frame->width) * static_cast<size_t>(demux_frame->width);
-            demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
-            const auto r = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kRed);
-            const auto g = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kGreen);
-            const auto b = ilp_movie::ChannelData(demux_frame, ilp_movie::Channel::kBlue);
-            std::memcpy(// NOLINT
-              /*__dest=*/g.data,
-              /*__src=*/filt_frame->data[0],
-              g.count * sizeof(float));
-            std::memcpy(// NOLINT
-              /*__dest=*/b.data,
-              /*__src=*/filt_frame->data[1],
-              b.count * sizeof(float));
-            std::memcpy(// NOLINT
-              /*__dest=*/r.data,
-              /*__src=*/filt_frame->data[2],
-              r.count * sizeof(float));
-
-            // got_frame = true;
-            goto end;
-          }
-          // else: unrecognized pixel format!
-
-          // display_frame(filt_frame, buffersink_ctx->inputs[0]->time_base);
-          av_frame_unref(filt_frame);
-        }
-        av_frame_unref(dec_frame);
-      }
-
-      // Wipe the packet.
-      av_packet_unref(pkt);
+    {
+      std::ostringstream oss;
+      oss << "Codec | framerate. " << dec_ctx->framerate.num << "/" << dec_ctx->framerate.den
+          << "\n";
+      ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
     }
-    // else: packet is from a stream that we are not interested in (maybe audio?).
+    {
+      std::ostringstream oss;
+      oss << "target_pts: " << target_pts << "\n";
+      ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
+    }
   }
 
+  constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
+  if (const int ret = av_seek_frame(fmt_ctx, video_stream_index, target_pts, kSeekFlags); ret < 0) {
+    log_utils_internal::LogAvError("Cannot seek to timestamp", ret);
+    return false;
+  }
+  avcodec_flush_buffers(dec_ctx);
+
+  bool got_frame = false;
+  int ret = 0;
+  do {
+    // Read a packet, which for video streams corresponds to one frame.
+    PacketRefHolder pkt{ dec_pkt };
+    ret = av_read_frame(fmt_ctx, pkt.get());
+
+    // Ignore packets that are not from the video stream we are trying to read from.
+    if (ret >= 0 && pkt.get()->stream_index != video_stream_index) {
+      pkt.unref();
+      continue;
+    }
+
+    if constexpr (kTrace.enabled) {
+      //log_utils_internal::LogPacket(fmt_ctx, pkt.get(), ilp_movie::LogLevel::kInfo);
+    }
+
+    if (ret < 0) {
+      // Failed to read frame - send flush packet to decoder.
+      ret = avcodec_send_packet(dec_ctx, /*avpkt=*/nullptr);
+    } else {
+      if (pkt.get()->pts == AV_NOPTS_VALUE) {
+        ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Missing packet PTS (B-frame?)\n");
+        return false;
+      }
+      ret = avcodec_send_packet(dec_ctx, pkt.get());
+    }
+
+    // Packet has been sent to the decoder.
+    pkt.unref();
+
+    if (ret < 0) {
+      log_utils_internal::LogAvError("Cannot submit a packet for decoding", ret);
+      return false;
+    }
+
+    while (ret >= 0) {
+      FrameRefHolder frame{ dec_frame };
+      ret = avcodec_receive_frame(dec_ctx, frame.get());
+      if (ret == AVERROR_EOF) {// NOLINT
+        goto end;// should this be an error if we haven't found our seek frame yet!?
+      } else if (ret == AVERROR(EAGAIN)) {
+        ret = 0;
+        break;
+      } else if (ret < 0) {
+        log_utils_internal::LogAvError("Cannot decode frame", ret);
+        return false;
+      }
+
+      if constexpr (kTrace.enabled) {
+        std::ostringstream oss;
+        oss << "Frame | pts: " << frame.get()->pts
+            << " | best_effort_ts: " << frame.get()->best_effort_timestamp
+            << " | pkt_duration: " << frame.get()->pkt_duration
+            << " | key_frame: " << frame.get()->key_frame
+            << " | sample_aspect_ratio: " << frame.get()->sample_aspect_ratio.num << "/"
+            << frame.get()->sample_aspect_ratio.den
+            << " | codec frame number: " << dec_ctx->frame_number << "\n";
+        ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
+      }
+
+      frame.get()->pts = frame.get()->best_effort_timestamp;
+      const int64_t pts = frame.get()->pts;
+      if (pts == AV_NOPTS_VALUE) {
+        ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Missing frame PTS\n");
+        return false;
+      }
+
+      // Check if the decoded frame has a PTS/duration that matches our seek target. If so, we will
+      // push the frame through the filter graph.
+      if (pts <= target_pts && target_pts < (pts + frame.get()->pkt_duration)) {
+        // Got a frame whose duration includes our seek target.
+        return filter_func(frame.get());
+
+        // av_frame_unref(impl->filt_frame);
+        // got_frame = true;
+        // goto end;
+      }
+
+      // Frame gets unref'd by the holder at the end of scope.
+    }
+
+  } while (ret >= 0 && !got_frame);
+
 end:
-  if (ret < 0 && ret != AVERROR_EOF) {// NOLINT
-    log_utils_internal::LogAvError("Cannot read frame", ret);
+  return got_frame;
+}
+
+[[nodiscard]] static auto QueryVideoInfo(AVFormatContext *const fmt_ctx,
+  AVCodecContext *const dec_ctx,
+  AVPacket *const dec_pkt,
+  AVFrame *const dec_frame,
+  const int video_stream_index,
+  ilp_movie::DemuxVideoInfo *const vi) noexcept -> bool
+{
+  assert(0 <= video_stream_index// NOLINT
+         && video_stream_index < static_cast<int>(fmt_ctx->nb_streams));
+  const AVStream *video_stream = fmt_ctx->streams[video_stream_index];// NOLINT
+  assert(video_stream != nullptr);// NOLINT
+
+  const auto filter_func = [&](AVFrame *f) noexcept {
+    if constexpr (kTrace.enabled) {
+      std::ostringstream oss;
+      oss << "Frame | display_picture_number: " << f->display_picture_number
+          << " | planes: " << av_pix_fmt_count_planes(static_cast<AVPixelFormat>(f->format))
+          << " | pix_fmt: '" << av_get_pix_fmt_name(static_cast<AVPixelFormat>(f->format)) << "'"
+          << "\n";
+
+      ilp_movie::LogMsg(kTrace.log_level, oss.str().c_str());
+    }
+    assert(f != nullptr);// NOLINT
+
+    vi->width = f->width;
+    vi->height = f->height;
+    vi->frame_rate = av_q2d(video_stream->r_frame_rate);
+    vi->first_frame_nb =
+      timestamp_internal::TimestampToFrameIndex(0,
+        video_stream->r_frame_rate,
+        video_stream->time_base,
+        video_stream->start_time != AV_NOPTS_VALUE ? video_stream->start_time : 0)
+      + 1;
+    vi->frame_count = video_stream->nb_frames;
+
+    // NOTE(tohi): This is a WILD guess. It might be better to just let the user
+    //             provide the desired output pixel format.
+    // clang-format off
+    vi->pix_fmt = ilp_movie::PixelFormat::kNone;
+    switch (av_pix_fmt_count_planes(static_cast<AVPixelFormat>(f->format))) {
+      case 1: vi->pix_fmt = ilp_movie::PixelFormat::kGray; break;   
+      case 3: vi->pix_fmt = ilp_movie::PixelFormat::kRGB;  break;
+      case 4: vi->pix_fmt = ilp_movie::PixelFormat::kRGBA; break;
+      default: break;
+    }
+    // clang-format on
+    return vi->pix_fmt != ilp_movie::PixelFormat::kNone;
+  };
+
+  // Take a look at the first frame to gather some information.
+  return SeekFrame(fmt_ctx,
+    dec_ctx,
+    dec_pkt,
+    dec_frame,
+    video_stream_index,
+    /*frame_index=*/0,
+    filter_func);
+}
+
+// Caller is responsible for freeing (av_frame_unref) the filtered frame after it has been used.
+[[nodiscard]] static auto FilterFrame(AVFilterContext *const buffersrc_ctx,
+  AVFilterContext *const buffersink_ctx,
+  AVFrame *const dec_frame,
+  AVFrame *const filt_frame) noexcept -> bool
+{
+  // Push the decoded frame into the filter graph.
+  if (const int ret =
+        av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
+      ret < 0) {
+    log_utils_internal::LogAvError("Cannot push decoded frame to the filter graph", ret);
     return false;
   }
 
-  return true;
-}
-#endif
+  int frame_count = 0;
+  int ret = 0;
+  for (;;) {
+    ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
+    if (ret >= 0) {
+      ++frame_count;
+      assert(frame_count == 1);// NOLINT
+      // Keep going, interesting to see how many frames we get (hopefully only one).
+    } else {
+      // This is the only way for the loop to end.
+      break;
+    }
+  }
 
+  // AVERROR(EAGAIN): No frames are available at this point; more input frames must be added
+  // to the filter graph to get more output.
+  //
+  // AVERROR_EOF: There will be no more output frames on this sink.
+  //
+  // These are not really an errors, at least not if we already managed to read one frame.
+  assert(ret < 0);// NOLINT
+  const bool err = ret != AVERROR(EAGAIN) && ret != AVERROR_EOF;// NOLINT
+  if (err) {
+    // An actual error has occured.
+    log_utils_internal::LogAvError("Cannot get frame from the filter graph", ret);
+  }
+
+  // We are expecting to get exactly one frame.
+  return !err && frame_count == 1;
+}
+
+// Returns AV_PIX_FMT_NONE if no suitable conversion could be found.
 [[nodiscard]] static constexpr auto AvPixelFormat(const ilp_movie::PixelFormat pix_fmt) noexcept
   -> AVPixelFormat
 {
@@ -270,15 +463,11 @@ struct DemuxImpl
   SeekTable seek_table = {};
 };
 
-auto MakeDemuxContext(const DemuxParams &params/*,
+auto DemuxMakeContext(const DemuxParams &params/*,
   DemuxFrame *first_frame*/) noexcept -> std::unique_ptr<DemuxContext>
 {
-  if (params.filename == nullptr) {
+  if (params.filename.empty()) {
     LogMsg(LogLevel::kError, "Empty filename\n");
-    return nullptr;
-  }
-  if (AvPixelFormat(params.pix_fmt) == AV_PIX_FMT_NONE) {
-    LogMsg(LogLevel::kError, "Unspecified pixel format\n");
     return nullptr;
   }
 
@@ -306,95 +495,150 @@ auto MakeDemuxContext(const DemuxParams &params/*,
     return nullptr;
   }
 
-  if (!OpenInputFile(
-        params.filename, &(impl->ifmt_ctx), &(impl->dec_ctx), &(impl->video_stream_index))) {
+  if (!OpenInputFile(params.filename.c_str(),
+        &(impl->ifmt_ctx),
+        &(impl->dec_ctx),
+        &(impl->video_stream_index))) {
     return nullptr;
   }
   assert(impl->video_stream_index >= 0);// NOLINT
 
-  av_dump_format(impl->ifmt_ctx, impl->video_stream_index, params.filename, /*is_output=*/0);
+  av_dump_format(
+    impl->ifmt_ctx, impl->video_stream_index, params.filename.c_str(), /*is_output=*/0);
 
-  // "scale=w=0:h=0:out_color_matrix=bt709"
+  // Determine if video stream is Gray | RGB | RGBA
+  DemuxVideoInfo video_info = {};
+  if (!QueryVideoInfo(impl->ifmt_ctx,
+        impl->dec_ctx,
+        impl->dec_pkt,
+        impl->dec_frame,
+        impl->video_stream_index,
+        &video_info)) {
+    return nullptr;
+  }
+
+  const AVPixelFormat av_pix_fmt = AvPixelFormat(video_info.pix_fmt);
+  if (av_pix_fmt == AV_PIX_FMT_NONE) {
+    LogMsg(LogLevel::kError, "Cannot determine output pixel format\n");
+    return nullptr;
+  }
+
   filter_graph_internal::FilterGraphArgs fg_args = {};
   fg_args.codec_ctx = impl->dec_ctx;
-  fg_args.filter_graph = "null";
-  fg_args.sws_flags = "";
+  fg_args.filter_graph = params.filter_graph;
+  fg_args.sws_flags = params.sws_flags;
   fg_args.in.pix_fmt = impl->dec_ctx->pix_fmt;
   fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
-  fg_args.out.pix_fmt = AvPixelFormat(params.pix_fmt);
+  fg_args.out.pix_fmt = AvPixelFormat(video_info.pix_fmt);
   if (!filter_graph_internal::ConfigureVideoFilters(
         fg_args, &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
     return nullptr;
   }
 
-#if 0
-  DemuxFrame first_frame = {};
-  if (!ReadFrame(impl->ifmt_ctx,
-        impl->dec_ctx,
-        impl->buffersrc_ctx,
-        impl->buffersink_ctx,
-        impl->dec_pkt,
-        impl->dec_frame,
-        impl->filt_frame,
-        impl->video_stream_index,
-        &first_frame)) {
-    return nullptr;
-  }
-  (void)first_frame;
-#else
-  //(void)first_frame;
-#endif
-
   auto demux_ctx = std::make_unique<DemuxContext>();
   demux_ctx->params = params;
+  demux_ctx->info = video_info;
   demux_ctx->impl = std::move(impl);
   return demux_ctx;
 }
 
-
-#if 0
-[[nodiscard]] static auto FrameToPts(const AVStream &st, const int frame_index) noexcept -> int64_t
-{
-  // NOTE(tohi): Assuming that the stream has constant frame rate!
-  const auto frame_rate = st.r_frame_rate;
-
-  return static_cast<int64_t>(
-    std::round(static_cast<double>(frame_index * frame_rate.den * st.time_base.den)
-               / static_cast<double>(frame_rate.num) * st.time_base.num));
-}
-#endif
-
-[[nodiscard]] static auto FrameIndexToTimestamp(const int frame_index,
-  const AVRational &frame_rate,
-  const AVRational &time_base,
-  const int64_t start_time) noexcept -> int64_t
-{
-  // Rationale:
-  //
-  // f = t * (fr.num / fr.den)   <=>   t = f * (fr.den / fr.num)
-  //
-  // where f is the (integer) frame index, t is time in seconds, and fr is the frame rate (expressed
-  // as frames / second, e.g. [24 / 1]). Now we want to convert the time, t, into a timestamp
-  // (integer), ts, in the provided time base (tb):
-  //
-  // t = (ts + ts_0) * (tb.num / tb.den)   <=>   ts = t * (tb.den / tb.num) - ts_0
-  //
-  // Substituting in our expression for t from above:
-  //
-  // ts = f * (fr.den * tb.den / fr.num * tb.num) - ts_0
-  //
-  // NOTE(tohi) that we assume a constant frame rate here!
-
-  return static_cast<int64_t>(
-           std::round(frame_index * av_q2d(av_mul_q(av_inv_q(frame_rate), av_inv_q(time_base)))))
-         - (start_time != AV_NOPTS_VALUE ? start_time : 0);
-}
-
-
 auto DemuxSeek(const DemuxContext &demux_ctx,
-  const int frame_index,
+  const int64_t frame_nb,
   DemuxFrame *const demux_frame) noexcept -> bool
 {
+  const auto *impl = demux_ctx.impl.get();
+  assert(impl != nullptr);// NOLINT
+
+  const auto filter_func = [&](AVFrame *dec_frame) noexcept {
+    if (!FilterFrame(impl->buffersrc_ctx, impl->buffersink_ctx, dec_frame, impl->filt_frame)) {
+      // av_frame_unref(impl->dec_frame);
+      av_frame_unref(impl->filt_frame);
+      return false;
+    }
+    assert(dec_frame->pts == impl->filt_frame->pts);// NOLINT
+    // av_frame_unref(impl->dec_frame);
+
+    // Transfer frame data to output frame.
+    demux_frame->width = impl->filt_frame->width;
+    demux_frame->height = impl->filt_frame->height;
+    demux_frame->frame_nb = frame_nb;
+    demux_frame->key_frame = impl->filt_frame->key_frame > 0;
+    demux_frame->pixel_aspect_ratio = 1.0;
+    if (!(impl->dec_frame->sample_aspect_ratio.num == 0
+          && impl->dec_frame->sample_aspect_ratio.den == 1)) {
+      demux_frame->pixel_aspect_ratio = av_q2d(impl->dec_frame->sample_aspect_ratio);
+    }
+
+    PixelData<float> pix = {};
+    constexpr std::array<Channel, 4> kChannels = {
+      Channel::kGreen,
+      Channel::kBlue,
+      Channel::kRed,
+      Channel::kAlpha,
+    };
+    std::size_t channel_count = 0U;
+
+    // clang-format off
+    switch (impl->filt_frame->format) {
+    case AV_PIX_FMT_GRAYF32:
+      demux_frame->pix_fmt = PixelFormat::kGray;
+      channel_count = ChannelCount(demux_frame->pix_fmt);
+      demux_frame->buf.count = channel_count;
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+      pix = ChannelData(demux_frame, Channel::kGray);
+      assert(!Empty(pix));// NOLINT
+      assert(impl->filt_frame->data[0] != nullptr);// NOLINT
+      std::memcpy(pix.data, impl->filt_frame->data[0], pix.count * sizeof(float));// NOLINT
+      break;
+    case AV_PIX_FMT_GBRPF32:
+      demux_frame->pix_fmt = PixelFormat::kRGB;
+      channel_count = ChannelCount(demux_frame->pix_fmt);
+      demux_frame->buf.count = channel_count;
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+      for (std::size_t i = 0U; i < channel_count; ++i) {
+        pix = ChannelData(demux_frame, kChannels[i]);// NOLINT
+        assert(!Empty(pix));// NOLINT
+        assert(impl->filt_frame->data[i] != nullptr);// NOLINT
+        std::memcpy(pix.data, impl->filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+      }
+      break;
+    case AV_PIX_FMT_GBRAPF32:
+      demux_frame->pix_fmt = PixelFormat::kRGBA;
+      channel_count = ChannelCount(demux_frame->pix_fmt);
+      demux_frame->buf.count = channel_count;
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+      demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+      for (std::size_t i = 0U; i < channel_count; ++i) {
+        pix = ChannelData(demux_frame, kChannels[i]);// NOLINT
+        assert(!Empty(pix));// NOLINT
+        assert(impl->filt_frame->data[i] != nullptr);// NOLINT
+        std::memcpy(pix.data, impl->filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+      }
+      break;
+    default:
+      LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+      return false;
+    }
+    // clang-format on
+
+    return true;
+  };
+
+  return SeekFrame(impl->ifmt_ctx,
+    impl->dec_ctx,
+    impl->dec_pkt,
+    impl->dec_frame,
+    impl->video_stream_index,
+    frame_nb - 1,
+    filter_func);
+
+
+#if 0
   const auto *impl = demux_ctx.impl.get();
   assert(impl != nullptr);// NOLINT
 
@@ -403,51 +647,35 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
   const AVStream *video_stream = impl->ifmt_ctx->streams[impl->video_stream_index];// NOLINT
   assert(video_stream != nullptr);// NOLINT
 
-  // Assume constant frame rate.
-  const AVRational frame_rate = video_stream->r_frame_rate;
-  (void)frame_rate;
+  // Seek is done on frame pts.
+  // NOTE: Frame index is zero-based.
+  const int64_t target_pts = FrameIndexToTimestamp(frame_nb - 1,
+    video_stream->r_frame_rate,
+    video_stream->time_base,
+    video_stream->start_time != AV_NOPTS_VALUE ? video_stream->start_time : 0);
 
-  {
-    std::ostringstream oss;
-    oss << "Stream | nb_frames: " << video_stream->nb_frames
-        << ", frame_rate: " << video_stream->r_frame_rate.num << "/"
-        << video_stream->r_frame_rate.den << ", start_time: " << video_stream->start_time
-        << ", time_base: " << video_stream->time_base.num << "/" << video_stream->time_base.den
-        << "\n";
-    LogMsg(LogLevel::kInfo, oss.str().c_str());
+  if constexpr (kTrace.enabled) {
+    {
+      std::ostringstream oss;
+      oss << "Stream | nb_frames: " << video_stream->nb_frames
+          << ", frame_rate: " << video_stream->r_frame_rate.num << "/"
+          << video_stream->r_frame_rate.den << ", start_time: " << video_stream->start_time
+          << ", time_base: " << video_stream->time_base.num << "/" << video_stream->time_base.den
+          << "\n";
+      LogMsg(kTrace.log_level, oss.str().c_str());
+    }
+    {
+      std::ostringstream oss;
+      oss << "Codec | framerate. " << impl->dec_ctx->framerate.num << "/"
+          << impl->dec_ctx->framerate.den << "\n";
+      LogMsg(kTrace.log_level, oss.str().c_str());
+    }
+    {
+      std::ostringstream oss;
+      oss << "target_pts: " << target_pts << "\n";
+      LogMsg(LogLevel::kInfo, oss.str().c_str());
+    }
   }
-  {
-    std::ostringstream oss;
-    oss << "Codec | framerate. " << impl->dec_ctx->framerate.num << "/"
-        << impl->dec_ctx->framerate.den << "\n";
-    LogMsg(LogLevel::kInfo, oss.str().c_str());
-  }
-
-  // Remove first dts: when non zero seek should be more accurate
-  // const auto first_pts_usecs = static_cast<int64_t>(
-  //   std::round(static_cast<double>(video_stream->start_time * video_stream->time_base.num)
-  //              / static_cast<double>(video_stream->time_base.den * AV_TIME_BASE)));
-  // target_dts_usecs += first_dts_usecs;
-
-  // Seek is done on packet dts.
-  int64_t target_pts = FrameIndexToTimestamp(
-    frame_index, video_stream->r_frame_rate, video_stream->time_base, video_stream->start_time);
-
-  {
-    std::ostringstream oss;
-    oss << "target_pts: " << target_pts << "\n";
-    LogMsg(LogLevel::kInfo, oss.str().c_str());
-  }
-
-  // if (impl->dec_ctx->framerate.num == 0 && impl->dec_ctx->framerate.den == 1) {
-  //   LogMsg(LogLevel::kError, "Unknown codec framerate\n");
-  //   return false;
-  // }
-
-  // const int64_t seek_target =
-  //   FrameToPts(impl->ifmt_ctx->streams[impl->video_stream_index], frame_pos);// NOLINT
-  // seek_target = av_rescale_q(
-  //   seek_target, AV_TIME_BASE_Q, impl->ifmt_ctx->streams[impl->video_stream_index]->time_base);
 
   constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
   if (const int ret =
@@ -458,32 +686,37 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
   }
   avcodec_flush_buffers(impl->dec_ctx);
 
-  AVPacket *pkt = impl->dec_pkt;
-
   bool got_frame = false;
   int ret = 0;
   do {
-    ret = av_read_frame(impl->ifmt_ctx, pkt);
+    {
+      // Read a packet, which for video streams corresponds to one frame.
+      PacketRefHolder pkt{ impl->dec_pkt };
+      ret = av_read_frame(impl->ifmt_ctx, pkt.get());
 
-    // Ignore packet that are not from the video stream we are interested in.
-    if (ret >= 0 && pkt->stream_index != impl->video_stream_index) {
-      av_packet_unref(pkt);
-      continue;
-    }
-    log_utils_internal::LogPacket(impl->ifmt_ctx, impl->dec_pkt, ilp_movie::LogLevel::kInfo);
-
-    if (ret < 0) {
-      // Send flush packet to decoder.
-      ret = avcodec_send_packet(impl->dec_ctx, nullptr);
-    } else {
-      if (pkt->pts == AV_NOPTS_VALUE) {
-        LogMsg(LogLevel::kError, "Missing packet/frame PTS value\n");
-        return false;
+      // Ignore packets that are not from the video stream we are interested in.
+      if (ret >= 0 && pkt.get()->stream_index != impl->video_stream_index) {
+        pkt.unref();
+        continue;
       }
-      ret = avcodec_send_packet(impl->dec_ctx, pkt);
-    }
 
-    av_packet_unref(pkt);
+      if constexpr (kTrace.enabled) {
+        log_utils_internal::LogPacket(impl->ifmt_ctx, impl->dec_pkt, ilp_movie::LogLevel::kInfo);
+      }
+
+      if (ret < 0) {
+        // Failed to read frame - send flush packet to decoder.
+        ret = avcodec_send_packet(impl->dec_ctx, /*avpkt=*/nullptr);
+      } else {
+        if (pkt.get()->pts == AV_NOPTS_VALUE) {
+          LogMsg(LogLevel::kError, "Missing packet PTS (B-frame?)\n");
+          return false;
+        }
+        ret = avcodec_send_packet(impl->dec_ctx, pkt.get());
+      }
+
+      // Packet has been sent to the decoder. It gets unref'd by the holder at the end of scope.
+    }
 
     if (ret < 0) {
       log_utils_internal::LogAvError("Cannot submit a packet for decoding", ret);
@@ -491,7 +724,8 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
     }
 
     while (ret >= 0) {
-      ret = avcodec_receive_frame(impl->dec_ctx, impl->dec_frame);
+      FrameRefHolder frh{ impl->dec_frame };
+      ret = avcodec_receive_frame(impl->dec_ctx, frh.get());
       if (ret == AVERROR_EOF) {// NOLINT
         goto end;// should this be an error if we haven't found our seek frame yet!?
       } else if (ret == AVERROR(EAGAIN)) {
@@ -502,7 +736,7 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
         return false;
       }
 
-      {
+      if constexpr (kTrace.enabled) {
         std::ostringstream oss;
         oss << "Frame | pts: " << impl->dec_frame->pts
             << " | best_effort_ts: " << impl->dec_frame->best_effort_timestamp
@@ -510,12 +744,13 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
             << " | key_frame: " << impl->dec_frame->key_frame
             << " | sample_aspect_ratio: " << impl->dec_frame->sample_aspect_ratio.num << "/"
             << impl->dec_frame->sample_aspect_ratio.den << "\n";
-        LogMsg(LogLevel::kInfo, oss.str().c_str());
+        LogMsg(kTrace.log_level, oss.str().c_str());
       }
 
       impl->dec_frame->pts = impl->dec_frame->best_effort_timestamp;
       if (impl->dec_frame->pts == AV_NOPTS_VALUE) {
-        // error! b-frame?
+        LogMsg(LogLevel::kError, "Missing frame PTS\n");
+        return false;
       }
 
       // Check if the decoded frame has a PTS/duration that matches our seek target. If so, we will
@@ -524,218 +759,95 @@ auto DemuxSeek(const DemuxContext &demux_ctx,
           && target_pts < (impl->dec_frame->pts + impl->dec_frame->pkt_duration)) {
         // Got a frame whose duration includes our seek target.
 
-        // Send the decoded frame to the filter graph.
-        if (ret = av_buffersrc_add_frame_flags(
-              impl->buffersrc_ctx, impl->dec_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
-            ret < 0) {
-          log_utils_internal::LogAvError("Cannot push decoded frame to the filter graph", ret);
-          goto end;
-        }
-
-        // Get filtered frames from the filter graph.
-        while (ret >= 0) {
-          ret = av_buffersink_get_frame(impl->buffersink_ctx, impl->filt_frame);
-          if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
-            break;
-          }
-          if (ret < 0) { goto end; }
-
-          // Transfer frame data to output frame.
-          demux_frame->width = impl->filt_frame->width;
-          demux_frame->height = impl->filt_frame->height;
-          demux_frame->frame_index = frame_index;
-          demux_frame->key_frame = impl->filt_frame->key_frame > 0;
-          demux_frame->pixel_aspect_ratio = 1.0;
-          if (impl->dec_frame->sample_aspect_ratio.num != 0
-              && impl->dec_frame->sample_aspect_ratio.den != 1) {
-            demux_frame->pixel_aspect_ratio = av_q2d(impl->dec_frame->sample_aspect_ratio);
-          }
-
-          //
-          // ProcessFrame(frame)
-          // ...
-          //
-          PixelData<float> r = {};
-          PixelData<float> g = {};
-          PixelData<float> b = {};
-          PixelData<float> a = {};
-          // clang-format off
-          switch (impl->filt_frame->format) {
-          case AV_PIX_FMT_GRAYF32:
-            demux_frame->pix_fmt = PixelFormat::kGray;
-            demux_frame->buf.count = ChannelCount(demux_frame->pix_fmt)
-                                     * static_cast<size_t>(demux_frame->width)
-                                     * static_cast<size_t>(demux_frame->width);
-            demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
-            r = ChannelData(demux_frame, Channel::kGray);
-            std::memcpy(r.data, impl->filt_frame->data[0], r.count * sizeof(float));// NOLINT
-            break;
-          case AV_PIX_FMT_GBRPF32:
-            demux_frame->pix_fmt = PixelFormat::kRGB;
-            demux_frame->buf.count = ChannelCount(demux_frame->pix_fmt)
-                                     * static_cast<size_t>(demux_frame->width)
-                                     * static_cast<size_t>(demux_frame->width);
-            demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
-            r = ChannelData(demux_frame, Channel::kRed);
-            g = ChannelData(demux_frame, Channel::kGreen);
-            b = ChannelData(demux_frame, Channel::kBlue);
-            std::memcpy(g.data, impl->filt_frame->data[0], g.count * sizeof(float));// NOLINT
-            std::memcpy(b.data, impl->filt_frame->data[1], b.count * sizeof(float));// NOLINT
-            std::memcpy(r.data, impl->filt_frame->data[2], r.count * sizeof(float));// NOLINT
-            break;
-          case AV_PIX_FMT_GBRAPF32:
-            demux_frame->pix_fmt = PixelFormat::kRGBA;
-            demux_frame->buf.count = ChannelCount(demux_frame->pix_fmt)
-                                     * static_cast<size_t>(demux_frame->width)
-                                     * static_cast<size_t>(demux_frame->width);
-            demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
-            r = ChannelData(demux_frame, Channel::kRed);
-            g = ChannelData(demux_frame, Channel::kGreen);
-            b = ChannelData(demux_frame, Channel::kBlue);
-            a = ChannelData(demux_frame, Channel::kAlpha);
-            std::memcpy(g.data, impl->filt_frame->data[0], g.count * sizeof(float));// NOLINT
-            std::memcpy(b.data, impl->filt_frame->data[1], b.count * sizeof(float));// NOLINT
-            std::memcpy(r.data, impl->filt_frame->data[2], r.count * sizeof(float));// NOLINT
-            std::memcpy(a.data, impl->filt_frame->data[3], a.count * sizeof(float));// NOLINT
-            break;
-          default:
-            LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-            return false;
-          }
-          // clang-format off
-          // else: unrecognized pixel format!
-
-          // display_frame(filt_frame, buffersink_ctx->inputs[0]->time_base);
-
+        if (!FilterFrame(
+              impl->buffersrc_ctx, impl->buffersink_ctx, impl->dec_frame, impl->filt_frame)) {
+          av_frame_unref(impl->dec_frame);
           av_frame_unref(impl->filt_frame);
-          got_frame = true;
+          return false;
         }
+        assert(impl->dec_frame->pts == impl->filt_frame->pts);// NOLINT
+        av_frame_unref(impl->dec_frame);
+
+        // Transfer frame data to output frame.
+        demux_frame->width = impl->filt_frame->width;
+        demux_frame->height = impl->filt_frame->height;
+        demux_frame->frame_nb = frame_nb;
+        demux_frame->key_frame = impl->filt_frame->key_frame > 0;
+        demux_frame->pixel_aspect_ratio = 1.0;
+        if (!(impl->dec_frame->sample_aspect_ratio.num == 0
+              && impl->dec_frame->sample_aspect_ratio.den == 1)) {
+          demux_frame->pixel_aspect_ratio = av_q2d(impl->dec_frame->sample_aspect_ratio);
+        }
+
+        PixelData<float> pix = {};
+        constexpr std::array<Channel, 4> kChannels = {
+          Channel::kGreen,
+          Channel::kBlue,
+          Channel::kRed,
+          Channel::kAlpha,
+        };
+        std::size_t channel_count = 0U;
+
+        // clang-format off
+        switch (impl->filt_frame->format) {
+        case AV_PIX_FMT_GRAYF32:
+          demux_frame->pix_fmt = PixelFormat::kGray;
+          channel_count = ChannelCount(demux_frame->pix_fmt);
+          demux_frame->buf.count = channel_count;
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+          pix = ChannelData(demux_frame, Channel::kGray);
+          assert(!Empty(pix));// NOLINT
+          assert(impl->filt_frame->data[0] != nullptr);// NOLINT
+          std::memcpy(pix.data, impl->filt_frame->data[0], pix.count * sizeof(float));// NOLINT
+          break;
+        case AV_PIX_FMT_GBRPF32:
+          demux_frame->pix_fmt = PixelFormat::kRGB;
+          channel_count = ChannelCount(demux_frame->pix_fmt);
+          demux_frame->buf.count = channel_count;
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+          for (std::size_t i = 0U; i < channel_count; ++i) {
+            pix = ChannelData(demux_frame, kChannels[i]);// NOLINT
+            assert(!Empty(pix));// NOLINT
+            assert(impl->filt_frame->data[i] != nullptr);// NOLINT
+            std::memcpy(pix.data, impl->filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+          }
+          break;
+        case AV_PIX_FMT_GBRAPF32:
+          demux_frame->pix_fmt = PixelFormat::kRGBA;
+          channel_count = ChannelCount(demux_frame->pix_fmt);
+          demux_frame->buf.count = channel_count;
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.count *= static_cast<size_t>(demux_frame->width);
+          demux_frame->buf.data = std::make_unique<float[]>(demux_frame->buf.count);// NOLINT
+          for (std::size_t i = 0U; i < channel_count; ++i) {
+            pix = ChannelData(demux_frame, kChannels[i]);// NOLINT
+            assert(!Empty(pix));// NOLINT
+            assert(impl->filt_frame->data[i] != nullptr);// NOLINT
+            std::memcpy(pix.data, impl->filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+          }
+          break;
+        default:
+          LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+          return false;
+        }
+        // clang-format off
+
+        av_frame_unref(impl->filt_frame);
+        got_frame = true;
+        goto end;
       }
 
-      av_frame_unref(impl->dec_frame);
+      // Frame gets unref'd by the holder at the end of scope.
     }
 
-  } while (ret >= 0);
+  } while (ret >= 0 && !got_frame);
 
 end:
   return got_frame;
-
-#if 0
-    // Read frames until we find the one we are seeking.
-    // For video: one packet == one frame.
-    int ret = 0;
-  while (av_read_frame(impl->ifmt_ctx, impl->dec_pkt) >= 0) {
-    log_utils_internal::LogPacket(impl->ifmt_ctx, impl->dec_pkt, ilp_movie::LogLevel::kInfo);
-
-
-    // Read a packet from the file.
-    // if (ret = av_read_frame(impl->ifmt_ctx, impl->dec_pkt); ret < 0) {
-    //   ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot read packet\n");
-    //   break;
-    // }
-
-    if (impl->dec_pkt->stream_index == impl->video_stream_index) {
-      // Send the packet to the decoder.
-      if (ret = avcodec_send_packet(impl->dec_ctx, impl->dec_pkt); ret < 0) {
-        log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
-        break;
-      }
-
-      while (ret >= 0) {
-        ret = avcodec_receive_frame(impl->dec_ctx, impl->dec_frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
-          // AVERROR(EAGAIN): Output is not available in this state.
-          // AVERROR_EOF: Decoder fully flushed, there will be no more output frames.
-          break;
-        } else if (ret == AVERROR(EINVAL)) {
-          // AVERROR(EINVAL): Codec not opened or it is an encoder.
-          return false;
-        } else if (ret < 0) {
-          log_utils_internal::LogAvError("Cannot receive frame from the decoder", ret);
-
-          //          goto end;
-        }
-
-        impl->dec_frame->pts = impl->dec_frame->best_effort_timestamp;
-
-        {
-          std::ostringstream oss;
-          oss << "Frame pts: " << impl->dec_frame->pts << "\n";
-          LogMsg(LogLevel::kInfo, oss.str().c_str());
-        }
-
-
-        // Wipe the frame buffers.
-        av_frame_unref(impl->dec_frame);
-      }
-    }
-    // else: The packet is not from the video stream we are interested in.
-
-    // Wipe the packet buffer.
-    av_packet_unref(impl->dec_pkt);
-
-    if (ret < 0) { break; }
-  }
-#endif
-
-  // return ReadFrame(impl->ifmt_ctx,
-  //   impl->dec_ctx,
-  //   impl->buffersrc_ctx,
-  //   impl->buffersink_ctx,
-  //   impl->dec_pkt,
-  //   impl->dec_frame,
-  //   impl->filt_frame,
-  //   impl->video_stream_index,
-  //   demux_frame);
-  (void)demux_frame;
-
-  return true;
-
-#if 0
-
-  // while(...)
-  {
-    if (const int ret = av_read_frame(impl->ifmt_ctx, impl->dec_pkt); ret < 0) {
-      log_utils_internal::LogAvError("Cannot read frame", ret);
-      return false;
-    }
-
-    if (const int ret = avcodec_send_packet(impl->dec_ctx, impl->dec_pkt); ret < 0) {
-      log_utils_internal::LogAvError("Error while sending a packet for decoding", ret);
-      return false;
-    }
-
-    int ret = 0;
-    while (ret >= 0) {
-      ret = avcodec_receive_frame(impl->dec_ctx, impl->dec_frame);
-      if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
-        break;
-      } else if (ret < 0) {
-        log_utils_internal::LogAvError("Error while receiving a frame from the decoder", ret);
-        return false;
-      }
-
-      impl->dec_frame->pts = impl->dec_frame->best_effort_timestamp;
-
-      /*if (impl->dec_frame->best_effort_timestamp)*/
-      {
-        // convert frame to RGB format
-#if 0
-        dec_frame->format = AV_PIX_FMT_GBRPF32;
-
-        frame->width = impl->dec_frame->width;
-        frame->height = impl->dec_frame->height;
-        frame->r = impl->dec_frame->data
-        frame->g = 
-        frame->b =
-#endif
-      }
-      av_frame_unref(impl->dec_frame);
-    }
-  }
-
-
-  return true;
 #endif
 }
 

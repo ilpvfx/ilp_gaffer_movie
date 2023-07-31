@@ -11,10 +11,6 @@
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
 
-// ENV
-// export IECORE_LOG_LEVEL=Info
-// export GAFFER_EXTENSION_PATHS=~/dev/git/gaffer_extension_example/install:$GAFFER_EXTENSION_PATHS
-
 namespace Gaffer {
 // IE_CORE_FORWARDDECLARE(IntPlug)
 IE_CORE_FORWARDDECLARE(StringPlug)

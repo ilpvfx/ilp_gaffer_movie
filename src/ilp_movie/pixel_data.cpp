@@ -3,6 +3,7 @@
 #include <cassert>// assert
 #include <limits>// std::numeric_limits
 #include <optional>// std::optional
+#include <type_traits>// std::remove_pointer_t
 
 #include <ilp_movie/demux.hpp>// ilp_movie::DemuxFrame
 
@@ -36,6 +37,24 @@
   return image_size * channel_index;
 }
 
+template <typename PixelT>
+[[nodiscard]] static constexpr auto ChannelDataImpl(const int w,
+  const int h,
+  const ilp_movie::Channel ch,
+  PixelT *const buf,
+  const std::size_t buf_count) noexcept
+  -> ilp_movie::PixelData<std::remove_pointer_t<decltype(buf)>>
+{
+  const auto image_size = ImageSize(w, h);
+  if (!image_size.has_value()) { return {}; }
+  const auto ch_index = ChannelIndex(ch);
+  if (!ch_index.has_value()) { return {}; }
+  const std::size_t p_offset = PixelDataOffset(*image_size, *ch_index);
+  if (!(p_offset < buf_count)) { return {}; }
+  assert(buf != nullptr);// NOLINT
+  return { /*.data=*/&(buf[p_offset]), /*.count=*/*image_size };// NOLINT
+}
+
 namespace ilp_movie {
 
 auto ChannelData(const int w,
@@ -44,14 +63,7 @@ auto ChannelData(const int w,
   const float *const buf,
   const std::size_t buf_count) noexcept -> PixelData<const float>
 {
-  assert(buf != nullptr);// NOLINT
-  const auto image_size = ImageSize(w, h);
-  if (!image_size.has_value()) { return {}; }
-  const auto ch_index = ChannelIndex(ch);
-  if (!ch_index.has_value()) { return {}; }
-  const std::size_t p_offset = PixelDataOffset(*image_size, *ch_index);
-  if (!(p_offset < buf_count)) { return {}; }
-  return { /*.data=*/&(buf[p_offset]), /*.count=*/*image_size };// NOLINT
+  return ChannelDataImpl(w, h, ch, buf, buf_count);
 }
 
 auto ChannelData(const int w,
@@ -60,14 +72,7 @@ auto ChannelData(const int w,
   float *const buf,
   const std::size_t buf_count) noexcept -> PixelData<float>
 {
-  assert(buf != nullptr);// NOLINT
-  const auto image_size = ImageSize(w, h);
-  if (!image_size.has_value()) { return {}; }
-  const auto ch_index = ChannelIndex(ch);
-  if (!ch_index.has_value()) { return {}; }
-  const std::size_t p_offset = PixelDataOffset(*image_size, *ch_index);
-  if (!(p_offset < buf_count)) { return {}; }
-  return { /*.data=*/&(buf[p_offset]), /*.count=*/*image_size };// NOLINT
+  return ChannelDataImpl(w, h, ch, buf, buf_count);
 }
 
 auto ChannelData(const DemuxFrame &f, const Channel ch) noexcept -> PixelData<const float>

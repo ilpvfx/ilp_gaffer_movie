@@ -105,8 +105,8 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
   });
 
   ilp_movie::DemuxParams demux_params = {};
-  demux_params.filename = key.first.c_str();
-  auto demux_ctx = ilp_movie::MakeDemuxContext(demux_params);
+  demux_params.filename = key.first;
+  auto demux_ctx = ilp_movie::DemuxMakeContext(demux_params);
   if (demux_ctx == nullptr) {
     result.error.reset(new std::string("AvReader : Cannot initialize demuxer"));// NOLINT
     return result;
@@ -121,7 +121,8 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
   auto demux_frame_ptr = std::make_unique<ilp_movie::DemuxFrame>();
   demux_frame_ptr->width = demux_frame.width;
   demux_frame_ptr->height = demux_frame.height;
-  demux_frame_ptr->frame_index = demux_frame.frame_index;
+  demux_frame_ptr->frame_nb = demux_frame.frame_nb;
+  demux_frame_ptr->pixel_aspect_ratio = demux_frame.pixel_aspect_ratio;
   demux_frame_ptr->pix_fmt = demux_frame.pix_fmt;
   demux_frame_ptr->buf = std::move(demux_frame.buf);
 
@@ -159,6 +160,22 @@ FrameCache *GetFrameCache()
 }
 
 }// namespace
+
+#if 0
+// This function transforms an input region to account for the display window being flipped.
+// This is similar to Format::fromEXRSpace/toEXRSpace but those functions mix in switching
+// between inclusive/exclusive bounds, so in order to use them we would have to add a bunch
+// of confusing offsets by 1.  In this class, we always interpret ranges as [ minPixel,
+// onePastMaxPixel )
+[[nodiscard]] static auto FlopDisplayWindow(const Imath::Box2i &b,
+  const int displayOriginY,
+  const int displayHeight) -> Imath::Box2i
+{
+  return Imath::Box2i(
+    Imath::V2i(b.min.x, displayOriginY + displayOriginY + displayHeight - b.max.y),
+    Imath::V2i(b.max.x, displayOriginY + displayOriginY + displayHeight - b.min.y));
+}
+#endif
 
 namespace IlpGafferMovie {
 
@@ -445,6 +462,11 @@ Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context *context,
   if (frame == nullptr) { return parent->dataWindowPlug()->defaultValue(); }
   return Imath::Box2i(
     /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height));
+#if 0
+  const auto data_window = Imath::Box2i(
+    /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height));
+  return FlopDisplayWindow(data_window, 0, frame->_frame->height);
+#endif
 }
 
 void AvReader::hashMetadata(const GafferImage::ImagePlug *parent,
@@ -667,7 +689,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
     break;
   case ilp_movie::PixelFormat::kNone:
   default:
-    throw IECore::Exception(boost::str(boost::format("Unspecified frame pixel format")));
+    throw IECore::Exception("Unspecified frame pixel format");
   }
 
   const Imath::Box2i tileRegion = GafferImage::BufferAlgo::intersection(tileBound, dataWindow);
@@ -677,8 +699,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
                        * static_cast<size_t>(GafferImage::ImagePlug::tileSize())];
     const float *src = &(ch.data[static_cast<size_t>(y) * static_cast<size_t>(f->width)// NOLINT
                                  + static_cast<size_t>(tileRegion.min.x)]);
-    std::memcpy(
-      dst, src, sizeof(float) * (static_cast<size_t>(tileRegion.max.x - tileRegion.min.x)));
+    std::memcpy(dst, src, sizeof(float) * static_cast<size_t>(tileRegion.max.x - tileRegion.min.x));
   }
 
   return tileData;

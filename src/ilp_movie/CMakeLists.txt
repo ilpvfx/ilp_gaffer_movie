@@ -7,7 +7,8 @@ add_library(ilp_movie SHARED
   "pixel_data.cpp"
   "internal/dict_utils.cpp"
   "internal/filter_graph.cpp"
-  "internal/log_utils.cpp")
+  "internal/log_utils.cpp"
+  "internal/timestamp.cpp")
 add_library(ilp_movie::ilp_movie ALIAS ilp_movie)
 target_link_libraries(ilp_movie 
   PRIVATE 
