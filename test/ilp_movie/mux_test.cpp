@@ -64,7 +64,7 @@ TEST_CASE("H264")
     // Create a mux context with as many default settings as possible (i.e. minimal config) that
     // should be valid.
     const auto mux_params = ilp_movie::MakeMuxParameters(
-      /*filename=*/"/tmp/test_data/mux_prores_default.mov",
+      /*filename=*/"/tmp/test_data/mux_h264_default.mov",
       /*width=*/164,
       /*height=*/128,
       /*frame_rate=*/24.0,

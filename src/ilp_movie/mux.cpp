@@ -345,7 +345,7 @@ auto MakeMuxParameters(const std::string_view filename,
   // p.colorspace = "bt709"sv;
   // p.color_trc = "iec61966-2-1"sv;
 
-  p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
+  // p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
   p.filter_graph =
     "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"sv;
 
@@ -445,41 +445,50 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
             return false;
           }
 
-          const int color_range = av_color_range_from_name(params.color_range.c_str());
-          if (color_range < 0) {
-            std::stringstream oss;
-            oss << "Could not set color range '" << params.color_range << "'";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_range);
-            return false;
+          if (!params.color_range.empty()) {
+            const int color_range = av_color_range_from_name(params.color_range.c_str());
+            if (color_range < 0) {
+              std::stringstream oss;
+              oss << "Could not set color range '" << params.color_range << "'";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_range);
+              return false;
+            }
+            codec_ctx->color_range = static_cast<AVColorRange>(color_range);
           }
-          codec_ctx->color_range = static_cast<AVColorRange>(color_range);
 
-          const int colorspace = av_color_space_from_name(params.colorspace.c_str());
-          if (colorspace < 0) {
-            std::stringstream oss;
-            oss << "Could not set colorspace '" << params.colorspace << "'";
-            log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
-            return false;
+          if (!params.colorspace.empty()) {
+            const int colorspace = av_color_space_from_name(params.colorspace.c_str());
+            if (colorspace < 0) {
+              std::stringstream oss;
+              oss << "Could not set colorspace '" << params.colorspace << "'";
+              log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
+              return false;
+            }
+            codec_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
           }
-          codec_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
 
-          const int color_primaries = av_color_primaries_from_name(params.color_primaries.c_str());
-          if (color_primaries < 0) {
-            std::stringstream oss;
-            oss << "Could not set color primaries '" << params.color_primaries << "'\n";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
-            return false;
+          if (!params.color_primaries.empty()) {
+            const int color_primaries =
+              av_color_primaries_from_name(params.color_primaries.c_str());
+            if (color_primaries < 0) {
+              std::stringstream oss;
+              oss << "Could not set color primaries '" << params.color_primaries << "'\n";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
+              return false;
+            }
+            codec_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
           }
-          codec_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
 
-          const int color_trc = av_color_transfer_from_name(params.color_trc.c_str());
-          if (color_trc < 0) {
-            std::stringstream oss;
-            oss << "Could not set color transfer characteristics '" << params.color_trc << "'\n";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
-            return false;
+          if (!params.color_trc.empty()) {
+            const int color_trc = av_color_transfer_from_name(params.color_trc.c_str());
+            if (color_trc < 0) {
+              std::stringstream oss;
+              oss << "Could not set color transfer characteristics '" << params.color_trc << "'\n";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
+              return false;
+            }
+            codec_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
           }
-          codec_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
 
           if (codec_ctx->codec_id == AV_CODEC_ID_H264) {
             const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pix_fmt.c_str());
