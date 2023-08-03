@@ -19,6 +19,8 @@ extern "C" {
 #include <ilp_movie/mux.hpp>
 #include <ilp_movie/pixel_data.hpp>
 
+using namespace std::literals;// "hello"sv
+
 #if 0
 namespace fas {
 
@@ -527,30 +529,30 @@ TEST_CASE("seek - prores")
         ilp_movie::Channel::kBlue,
         seek_frame.buf.data.get(),
         seek_frame.buf.count);
-      float r_max_err = std::numeric_limits<float>::lowest();
-      float g_max_err = std::numeric_limits<float>::lowest();
-      float b_max_err = std::numeric_limits<float>::lowest();
-      float r_avg_err = 0.F;
-      float g_avg_err = 0.F;
-      float b_avg_err = 0.F;
+      double r_max_err = std::numeric_limits<double>::lowest();
+      double g_max_err = std::numeric_limits<double>::lowest();
+      double b_max_err = std::numeric_limits<double>::lowest();
+      double r_avg_err = 0.0;
+      double g_avg_err = 0.0;
+      double b_avg_err = 0.0;
       for (std::size_t i = 0; i < r.count; ++i) {
-        const float err = std::abs(r.data[i] - f.mux_frame.r[i]);// NOLINT
+        const auto err = static_cast<double>(std::abs(r.data[i] - f.mux_frame.r[i]));// NOLINT
         r_avg_err += err;
         r_max_err = std::max(err, r_max_err);
       }
-      r_avg_err /= static_cast<float>(r.count);
+      r_avg_err /= static_cast<double>(r.count);
       for (std::size_t i = 0; i < g.count; ++i) {
-        const float err = std::abs(g.data[i] - f.mux_frame.g[i]);// NOLINT
+        const auto err = static_cast<double>(std::abs(g.data[i] - f.mux_frame.g[i]));// NOLINT
         g_avg_err += err;
         g_max_err = std::max(err, g_max_err);
       }
-      g_avg_err /= static_cast<float>(g.count);
+      g_avg_err /= static_cast<double>(g.count);
       for (std::size_t i = 0; i < b.count; ++i) {
-        const float err = std::abs(b.data[i] - f.mux_frame.b[i]);// NOLINT
+        const auto err = static_cast<double>(std::abs(b.data[i] - f.mux_frame.b[i]));// NOLINT
         b_avg_err += err;
         b_max_err = std::max(err, b_max_err);
       }
-      b_avg_err /= static_cast<float>(b.count);
+      b_avg_err /= static_cast<double>(b.count);
 
       {
         std::ostringstream oss;
@@ -561,48 +563,56 @@ TEST_CASE("seek - prores")
         ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
       }
 
-      REQUIRE(0.F <= r_avg_err);// NOLINT
-      REQUIRE(0.F <= g_avg_err);// NOLINT
-      REQUIRE(0.F <= b_avg_err);// NOLINT
-      REQUIRE(r_max_err < 0.25F);// NOLINT
-      REQUIRE(g_max_err < 0.25F);// NOLINT
-      REQUIRE(b_max_err < 0.25F);// NOLINT
+      REQUIRE(g_avg_err < 0.01);// NOLINT
+      REQUIRE(g_avg_err < 0.01);// NOLINT
+      REQUIRE(b_avg_err < 0.01);// NOLINT
+      REQUIRE(r_max_err < 0.02);// NOLINT
+      REQUIRE(g_max_err < 0.02);// NOLINT
+      REQUIRE(b_max_err < 0.02);// NOLINT
     }
   };
 
   SECTION("RGB")
   {
     // From https://academysoftwarefoundation.github.io/EncodingGuidelines/Encoding.html:
-    // 
-    // ffmpeg 
-    //  -r 24 
-    //  -start_number 1 
-    //  -i inputfile.%04d.png 
-    //  -vf "scale=in_color_matrix=bt709:out_color_matrix=bt709" 
-    //  -vframes 100 
-    //  -c:v prores_ks 
-    //  -profile:v 3 
-    //  -pix_fmt yuv422p10le 
-    //  -color_range tv 
-    //  -colorspace bt709 
-    //  -color_primaries bt709 
-    //  -color_trc iec61966-2-1 
+    //
+    // ffmpeg
+    //  -r 24
+    //  -start_number 1
+    //  -i inputfile.%04d.png
+    //  -vf "scale=in_color_matrix=bt709:out_color_matrix=bt709"
+    //  -vframes 100
+    //  -c:v prores_ks
+    //  -profile:v 3
+    //  -pix_fmt yuv422p10le
+    //  -color_range tv
+    //  -colorspace bt709
+    //  -color_primaries bt709
+    //  -color_trc iec61966-2-1
     //  outputfile.mov
 
-    const char *const kFilename = "/tmp/test_data/demux_test.mov";
-    constexpr int kWidth = 512;
-    constexpr int kHeight = 512;
+    constexpr std::string_view kFilename = "/tmp/test_data/demux_test.mov"sv;
+    constexpr int kWidth = 640;
+    constexpr int kHeight = 480;
     constexpr int kFrameCount = 200;
 
-    // Write/mux
-    ilp_movie::MuxParameters mux_params = {};
-    mux_params.filename = kFilename;
-    mux_params.codec_name = "prores_ks";
-    // mux_params.
-    //mux_params.color_range = "tv";
-    mux_params.width = kWidth;
-    mux_params.height = kHeight;
-    auto mux_ctx = ilp_movie::MakeMuxContext(mux_params);
+    // Write/mux.
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;// -profile:v 3
+    auto mux_params = ilp_movie::MakeMuxParameters(kFilename,
+      kWidth,
+      kHeight,
+      /*frame_rate=*/24.0,// -r 24
+      enc_params);
+    REQUIRE(mux_params.has_value());
+    REQUIRE(mux_params->pix_fmt == "yuv422p10le"sv);// -pix_fmt yuv422p10le
+    mux_params->color_range = ilp_movie::ColorRange::kTv;// -color_range tv
+    mux_params->colorspace = ilp_movie::Colorspace::kBt709;// -colorspace bt709
+    mux_params->color_primaries = ilp_movie::Colorspace::kBt709;// -color_primaries bt709
+    mux_params->color_trc = ilp_movie::ColorTrc::kIec61966_2_1;// -color_trc iec61966-2-1
+    // -vf "scale=in_color_matrix=bt709:out_color_matrix=bt709"
+    mux_params->filter_graph = "scale=in_color_matrix=bt709:out_color_matrix=bt709"sv;
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
     REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
     write_frames(*mux_ctx, kFrameCount);
     mux_ctx.reset();
@@ -610,12 +620,14 @@ TEST_CASE("seek - prores")
     // Read/demux
     ilp_movie::DemuxParams demux_params = {};
     demux_params.filename = kFilename;
-    demux_params.filter_graph = "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709";
+    demux_params.filter_graph =
+      //"scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709";
+      "scale=in_color_matrix=bt709:out_color_matrix=bt709";
     auto demux_ctx = ilp_movie::DemuxMakeContext(demux_params);
     REQUIRE(dump_log_on_fail(demux_ctx != nullptr));
 
-    REQUIRE(demux_ctx->info.width == 512);
-    REQUIRE(demux_ctx->info.height == 512);
+    REQUIRE(demux_ctx->info.width == kWidth);
+    REQUIRE(demux_ctx->info.height == kHeight);
     REQUIRE(demux_ctx->info.first_frame_nb == 1);
     REQUIRE(demux_ctx->info.first_frame_nb + demux_ctx->info.frame_count - 1 == 200);
 
@@ -627,7 +639,7 @@ TEST_CASE("seek - prores")
   dump_log_on_fail(false);// TMP!!
 }
 
-//TEST_CASE("seek - h.264")
+// TEST_CASE("seek - h.264")
 [[maybe_unused]] void foo()
 {
   std::vector<std::string> log_lines = {};
@@ -742,7 +754,11 @@ TEST_CASE("seek - prores")
     constexpr int kFrameCount = 200;
 
     // Write/mux
+
+
     ilp_movie::MuxParameters mux_params = {};
+
+    // asdasd
     mux_params.filename = kFilename;
     mux_params.codec_name = "libx264";
     // mux_params.

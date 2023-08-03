@@ -32,6 +32,8 @@ extern "C" {
 #include <internal/filter_graph.hpp>
 #include <internal/log_utils.hpp>
 
+using namespace std::literals;// "hello"sv
+
 namespace ilp_movie {
 
 struct MuxImpl
@@ -61,8 +63,8 @@ struct MuxImpl
 
 }// namespace ilp_movie
 
-[[nodiscard]] static auto OpenOutputFile(const char *filename,
-  const char *enc_name,
+[[nodiscard]] static auto OpenOutputFile(const std::string_view filename,
+  const std::string_view enc_name,
   const double fps,
   const int width,
   const int height,
@@ -76,7 +78,7 @@ struct MuxImpl
   if (const int ret = avformat_alloc_output_context2(&fmt_ctx,
         /*oformat=*/nullptr,
         /*format_name=*/nullptr,
-        filename);
+        filename.data());
       ret < 0 || fmt_ctx == nullptr) {
     log_utils_internal::LogAvError("Cannot create output context", ret);
     return false;
@@ -92,7 +94,7 @@ struct MuxImpl
   out_stream->id = static_cast<int>(fmt_ctx->nb_streams - 1U);
 
   // Find the encoder.
-  const AVCodec *encoder = avcodec_find_encoder_by_name(enc_name);
+  const AVCodec *encoder = avcodec_find_encoder_by_name(enc_name.data());
   if (encoder == nullptr) {
     std::ostringstream oss;
     oss << "Cannot find encoder '" << enc_name << "'\n";
@@ -164,7 +166,7 @@ struct MuxImpl
 
   // Open the output file, if needed.
   if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
-    if (const int ret = avio_open(&(fmt_ctx)->pb, filename, AVIO_FLAG_WRITE); ret < 0) {
+    if (const int ret = avio_open(&(fmt_ctx)->pb, filename.data(), AVIO_FLAG_WRITE); ret < 0) {
       std::ostringstream oss;
       oss << "Cannot open output file '" << filename << "'";
       log_utils_internal::LogAvError(oss.str().c_str(), ret);
@@ -295,9 +297,104 @@ static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) noexc
 
 namespace ilp_movie {
 
+auto MakeMuxParameters(const std::string_view filename,
+  const int width,
+  const int height,
+  const double frame_rate,
+  const ProRes::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>
+{
+  MuxParameters p = {};
+
+  // NOTE: We are only considering 10-bit pixel formats for now.
+  // 4:2:2 profiles (no alpha support).
+  if (enc_params.profile_name == ProRes::ProfileName::kProxy && !enc_params.alpha) {
+    p.profile = 0;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kLt && !enc_params.alpha) {
+    p.profile = 1;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kStandard && !enc_params.alpha) {
+    p.profile = 2;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kHq && !enc_params.alpha) {
+    p.profile = 3;
+    p.pix_fmt = "yuv422p10le"sv;
+  }
+  // 4:4:4 profiles (optional alpha).
+  else if (enc_params.profile_name == ProRes::ProfileName::k4444) {
+    p.profile = 4;
+    p.pix_fmt = enc_params.alpha ? "yuva444p10le"sv : "yuv444p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::k4444xq) {
+    p.profile = 5;
+    p.pix_fmt = enc_params.alpha ? "yuva444p10le"sv : "yuv444p10le"sv;
+  } else {
+    // Unrecognized profile name.
+    LogMsg(LogLevel::kError, "Unrecognized ProRes profile name\n");
+    return std::nullopt;
+  }
+
+  // Fill in the parameters relevant for ProRes encoding.
+  p.filename = filename;
+  p.width = width;
+  p.height = height;
+  p.frame_rate = frame_rate;
+
+  // TODO(tohi): Set these, is the metadata correctly set on the container/format by the codec?
+  // p.color_range = "pc"sv;
+  // p.color_primaries = "bt709"sv;
+  // p.colorspace = "bt709"sv;
+  // p.color_trc = "iec61966-2-1"sv;
+
+  p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
+  p.filter_graph =
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"sv;
+
+  p.codec_name = "prores_ks"sv;
+  p.qscale = enc_params.qscale;
+
+  // Tricks QuickTime and Final Cut Pro into thinking that the movie was generated using a
+  // QuickTime ProRes encoder.
+  p.vendor = "apl0"sv;
+
+  return p;
+}
+
+auto MakeMuxParameters(const std::string_view filename,
+  const int width,
+  const int height,
+  const double frame_rate,
+  const H264::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>
+{
+
+  // Fill in the parameters relevant for ProRes encoding.
+  MuxParameters p = {};
+  p.filename = filename;
+  p.width = width;
+  p.height = height;
+  p.frame_rate = frame_rate;
+  p.pix_fmt = enc_params.pix_fmt;
+
+  p.color_range = enc_params.color_range;
+  p.color_primaries = enc_params.color_primaries;
+  p.colorspace = enc_params.colorspace;
+  p.color_trc = enc_params.color_trc;
+
+  p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
+  p.filter_graph =
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"sv;
+
+  p.codec_name = "libx264";
+  p.preset = enc_params.preset;
+  p.tune = enc_params.tune;
+  p.x264_params = enc_params.x264_params;
+  p.crf = enc_params.crf;
+
+  return p;
+}
+
 auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<MuxContext>
 {
-  if (params.filename == nullptr) {
+  if (params.filename.empty()) {
     LogMsg(LogLevel::kError, "Empty filename\n");
     return nullptr;
   }
@@ -318,7 +415,7 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
         if (impl_ptr->ofmt_ctx->pb != nullptr) {
           if (const int ret = avio_closep(&(impl_ptr->ofmt_ctx->pb)); ret < 0) {
             log_utils_internal::LogAvError("Cannot close file", ret);
-            // return false!?
+            // std::abort()!?
           }
         }
       }
@@ -339,7 +436,7 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
   if (!OpenOutputFile(
         params.filename,
         params.codec_name,
-        params.fps,
+        params.frame_rate,
         params.width,
         params.height,
         [&](AVCodecContext *codec_ctx, AVDictionary **enc_opt) {
@@ -348,78 +445,76 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
             return false;
           }
 
-          const int color_range = av_color_range_from_name(params.mp4_metadata.color_range);
+          const int color_range = av_color_range_from_name(params.color_range.c_str());
           if (color_range < 0) {
             std::stringstream oss;
-            oss << "Could not set color range '" << params.mp4_metadata.color_range << "'";
+            oss << "Could not set color range '" << params.color_range << "'";
             log_utils_internal::LogAvError(oss.str().c_str(), color_range);
             return false;
           }
           codec_ctx->color_range = static_cast<AVColorRange>(color_range);
 
-          const int colorspace = av_color_space_from_name(params.mp4_metadata.colorspace);
+          const int colorspace = av_color_space_from_name(params.colorspace.c_str());
           if (colorspace < 0) {
             std::stringstream oss;
-            oss << "Could not set colorspace '" << params.mp4_metadata.colorspace << "'";
+            oss << "Could not set colorspace '" << params.colorspace << "'";
             log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
             return false;
           }
           codec_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
 
-          const int color_primaries =
-            av_color_primaries_from_name(params.mp4_metadata.color_primaries);
+          const int color_primaries = av_color_primaries_from_name(params.color_primaries.c_str());
           if (color_primaries < 0) {
             std::stringstream oss;
-            oss << "Could not set color primaries '" << params.mp4_metadata.color_primaries
-                << "'\n";
+            oss << "Could not set color primaries '" << params.color_primaries << "'\n";
             log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
+            return false;
           }
           codec_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
 
-          const int color_trc = av_color_transfer_from_name(params.mp4_metadata.color_trc);
+          const int color_trc = av_color_transfer_from_name(params.color_trc.c_str());
           if (color_trc < 0) {
             std::stringstream oss;
-            oss << "Could not set color transfer characteristics '" << params.mp4_metadata.color_trc
-                << "'\n";
+            oss << "Could not set color transfer characteristics '" << params.color_trc << "'\n";
             log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
+            return false;
           }
           codec_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
 
           if (codec_ctx->codec_id == AV_CODEC_ID_H264) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.h264.cfg.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pix_fmt.c_str());
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             codec_ctx->pix_fmt = pix_fmt;
 
-            if (!(0 <= params.h264.cfg.crf && params.h264.cfg.crf <= 51)) {
+            if (!(0 <= params.crf && params.crf <= 51)) {
               LogMsg(LogLevel::kError, "Bad CRF (must be in [0..51])\n");
               return false;
             }
 
-            av_dict_set(enc_opt, "preset", params.h264.cfg.preset, /*flags=*/0);
-            av_dict_set_int(enc_opt, "crf", params.h264.cfg.crf, /*flags=*/0);
-            av_dict_set(enc_opt, "x264-params", params.h264.cfg.x264_params, /*flags=*/0);
-            if (params.h264.cfg.tune != nullptr) {
-              av_dict_set(enc_opt, "tune", params.h264.cfg.tune, /*flags=*/0);
+            av_dict_set(enc_opt, "preset", params.preset.c_str(), /*flags=*/0);
+            av_dict_set_int(enc_opt, "crf", params.crf, /*flags=*/0);
+            av_dict_set(enc_opt, "x264-params", params.x264_params.c_str(), /*flags=*/0);
+            if (params.tune != H264::Tune::kNone) {
+              av_dict_set(enc_opt, "tune", params.tune.c_str(), /*flags=*/0);
             }
           } else if (codec_ctx->codec_id == AV_CODEC_ID_PRORES) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pro_res.cfg.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pix_fmt.c_str());
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             codec_ctx->pix_fmt = pix_fmt;
 
-            if (!SetQScale(codec_ctx, params.pro_res.cfg.qscale)) {
+            if (!SetQScale(codec_ctx, params.qscale)) {
               LogMsg(LogLevel::kError, "Could not set qscale\n");
               return false;
             }
 
-            av_dict_set_int(
-              enc_opt, "profile", static_cast<int64_t>(params.pro_res.cfg.profile), /*flags=*/0);
-            av_dict_set(enc_opt, "vendor", params.pro_res.cfg.vendor, /*flags=*/0);
+            av_dict_set_int(enc_opt, "profile", static_cast<int64_t>(params.profile), /*flags=*/0);
+            av_dict_set(enc_opt, "vendor", params.vendor.c_str(), /*flags=*/0);
           } else {
             LogMsg(LogLevel::kError, "Could not configure unsupported encoder\n");
             return false;
@@ -432,11 +527,11 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
     return nullptr;
   }
 
-  av_dump_format(impl->ofmt_ctx, /*index=*/0, params.filename, /*is_output=*/1);
+  av_dump_format(impl->ofmt_ctx, /*index=*/0, params.filename.c_str(), /*is_output=*/1);
 
   filter_graph_internal::FilterGraphArgs fg_args = {};
   fg_args.codec_ctx = impl->enc_ctx;
-  fg_args.filter_graph = params.filtergraph;
+  fg_args.filter_graph = params.filter_graph;
   fg_args.sws_flags = params.sws_flags;
   fg_args.in.pix_fmt = AV_PIX_FMT_GBRPF32;
   fg_args.in.time_base = impl->enc_ctx->time_base;
