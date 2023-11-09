@@ -74,6 +74,6 @@ struct DemuxFrame
 
 // Frame number is one-based, i.e. 1 is the first frame of the video stream.
 [[nodiscard]] ILP_MOVIE_EXPORT auto
-  DemuxSeek(const DemuxContext &demux_ctx, int64_t frame_nb, DemuxFrame *frame) noexcept -> bool;
+  DemuxSeek(const DemuxContext &demux_ctx, int frame_nb, DemuxFrame *frame) noexcept -> bool;
 
 }// namespace ilp_movie

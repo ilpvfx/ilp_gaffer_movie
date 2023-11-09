@@ -13,23 +13,30 @@
 // ts = f * (fr.den * tb.den / fr.num * tb.num) - ts_0
 //
 // NOTE(tohi) that we assume a constant frame rate here!
-
+//
+// NOTE: pts * stream.time_base.num / stream.time_base.den = [s]
 #pragma once
 
-#include <cstdint>// std::int64_t
-
-struct AVRational;
+#include <cstdint>// int64_t
 
 namespace timestamp_internal {
 
-[[nodiscard]] auto FrameIndexToTimestamp(const std::int64_t frame_index,
-  const AVRational &frame_rate,
-  const AVRational &time_base,
-  const std::int64_t start_time) noexcept -> std::int64_t;
+// Frame index is zero-based.
+// Assumes start_pts is not AV_NOPTS_VALUE.
+[[nodiscard]] auto FrameToPts(int frame_index,
+  int frame_rate_num,
+  int frame_rate_den,
+  int tb_num,
+  int tb_den,
+  int64_t start_pts) noexcept -> int64_t;
 
-[[nodiscard]] auto TimestampToFrameIndex(const std::int64_t timestamp,
-  const AVRational &frame_rate,
-  const AVRational &time_base,
-  const std::int64_t start_time) noexcept -> std::int64_t;
+// Returns zero-based frame index.
+// Assumes start_pts is not AV_NOPTS_VALUE.
+[[nodiscard]] auto PtsToFrame(int64_t pts,
+  int frame_rate_num,
+  int frame_rate_den,
+  int tb_num,
+  int tb_den,
+  int64_t start_pts) noexcept -> int;
 
 }// namespace timestamp_internal

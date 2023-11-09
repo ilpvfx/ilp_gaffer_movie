@@ -41,10 +41,6 @@ constexpr struct
   int log_level = ilp_movie::LogLevel::kInfo;
 } kTrace = {};
 
-// clang-format off
-template<typename T> struct dependent_false : std::false_type {};
-// clang-format on
-
 template<typename ResourceT> class RefHolder
 {
 public:
@@ -70,7 +66,7 @@ public:
         av_frame_unref(_ptr);
         _released = true;
       } else {
-        static_assert(dependent_false<ResourceT>::value);
+        static_assert(sizeof(ResourceT) == 0U); // Fail.
       }
     }
   }
@@ -166,13 +162,32 @@ using FrameRefHolder = RefHolder<AVFrame>;
   return true;
 }
 
+
+[[nodiscard]] static auto StreamFrameRate(AVFormatContext *const fmt_ctx,
+  const int video_stream_index) noexcept -> AVRational
+{
+  // Default to 1 fps.
+  AVRational fr = {};
+  fr.num = 1;
+  fr.den = 1;
+
+  // If frame rate is specified, use it.
+  const AVStream *video_stream = fmt_ctx->streams[video_stream_index];// NOLINT
+  if (video_stream->r_frame_rate.num != 0 && video_stream->r_frame_rate.den != 0) {
+    fr.num = video_stream->r_frame_rate.num;
+    fr.den = video_stream->r_frame_rate.den;
+  }
+  return fr;
+}
+
+
 template<typename FilterFuncT>
 [[nodiscard]] static auto SeekFrame(AVFormatContext *const fmt_ctx,
   AVCodecContext *const dec_ctx,
   AVPacket *const dec_pkt,
   AVFrame *const dec_frame,
   const int video_stream_index,
-  const int64_t frame_index,
+  const int frame_index,
   FilterFuncT &&filter_func) noexcept -> bool
 {
   assert(0 <= video_stream_index// NOLINT
@@ -182,10 +197,14 @@ template<typename FilterFuncT>
 
   // Seek is done on frame pts.
   // NOTE: Frame index is zero-based.
-  const int64_t target_pts = timestamp_internal::FrameIndexToTimestamp(frame_index,
-    video_stream->r_frame_rate,
-    video_stream->time_base,
-    video_stream->start_time != AV_NOPTS_VALUE ? video_stream->start_time : 0);
+  const AVRational frame_rate = StreamFrameRate(fmt_ctx, video_stream_index);
+  const int64_t start_pts = 0;//StreamStartPts(fmt_ctx, dec_ctx, video_stream_index);
+  const int64_t target_pts = timestamp_internal::FrameToPts(frame_index,
+    frame_rate.num,
+    frame_rate.den,
+    video_stream->time_base.num,
+    video_stream->time_base.den,
+    start_pts);
 
   if constexpr (kTrace.enabled) {
     {
@@ -231,7 +250,7 @@ template<typename FilterFuncT>
     }
 
     if constexpr (kTrace.enabled) {
-      //log_utils_internal::LogPacket(fmt_ctx, pkt.get(), ilp_movie::LogLevel::kInfo);
+      // log_utils_internal::LogPacket(fmt_ctx, pkt.get(), ilp_movie::LogLevel::kInfo);
     }
 
     if (ret < 0) {
@@ -329,16 +348,24 @@ end:
     }
     assert(f != nullptr);// NOLINT
 
+    const AVRational frame_rate = StreamFrameRate(fmt_ctx, video_stream_index);
+    //const int64_t start_pts = 0;//StreamStartPts(fmt_ctx, dec_ctx, video_stream_index);
     vi->width = f->width;
     vi->height = f->height;
-    vi->frame_rate = av_q2d(video_stream->r_frame_rate);
+    vi->frame_rate = av_q2d(frame_rate);
+#if 0
     vi->first_frame_nb =
-      timestamp_internal::TimestampToFrameIndex(0,
-        video_stream->r_frame_rate,
-        video_stream->time_base,
-        video_stream->start_time != AV_NOPTS_VALUE ? video_stream->start_time : 0)
+      timestamp_internal::PtsToFrame(0,// TODO(tohi): should be pts of first frame!!!
+        frame_rate.num,
+        frame_rate.den,
+        video_stream->time_base.num,
+        video_stream->time_base.den,
+        start_pts)
       + 1;
-    vi->frame_count = video_stream->nb_frames;
+#else
+    vi->first_frame_nb = 1;
+#endif
+    vi->frame_count = 0;//StreamFrameCount();// video_stream->nb_frames;
 
     // NOTE(tohi): This is a WILD guess. It might be better to just let the user
     //             provide the desired output pixel format.
@@ -397,7 +424,7 @@ end:
   //
   // AVERROR_EOF: There will be no more output frames on this sink.
   //
-  // These are not really an errors, at least not if we already managed to read one frame.
+  // These are not really errors, at least not if we already managed to read one frame.
   assert(ret < 0);// NOLINT
   const bool err = ret != AVERROR(EAGAIN) && ret != AVERROR_EOF;// NOLINT
   if (err) {
@@ -523,17 +550,17 @@ auto DemuxMakeContext(const DemuxParams &params/*,
     return nullptr;
   }
 
-  filter_graph_internal::FilterGraphArgs fg_args = {};
-  fg_args.codec_ctx = impl->dec_ctx;
-  fg_args.filter_graph = params.filter_graph;
-  fg_args.sws_flags = params.sws_flags;
-  fg_args.in.pix_fmt = impl->dec_ctx->pix_fmt;
-  fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
-  fg_args.out.pix_fmt = AvPixelFormat(video_info.pix_fmt);
-  if (!filter_graph_internal::ConfigureVideoFilters(
-        fg_args, &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
-    return nullptr;
-  }
+  // filter_graph_internal::FilterGraphArgs fg_args = {};
+  // fg_args.codec_ctx = impl->dec_ctx;
+  // fg_args.filter_graph = params.filter_graph;
+  // fg_args.sws_flags = params.sws_flags;
+  // fg_args.in.pix_fmt = impl->dec_ctx->pix_fmt;
+  // fg_args.in.time_base = impl->ifmt_ctx->streams[impl->video_stream_index]->time_base;// NOLINT
+  // fg_args.out.pix_fmt = AvPixelFormat(video_info.pix_fmt);
+  // if (!filter_graph_internal::ConfigureVideoFilters(
+  //       fg_args, &(impl->filter_graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
+  //   return nullptr;
+  // }
 
   auto demux_ctx = std::make_unique<DemuxContext>();
   demux_ctx->params = params;
@@ -543,7 +570,7 @@ auto DemuxMakeContext(const DemuxParams &params/*,
 }
 
 auto DemuxSeek(const DemuxContext &demux_ctx,
-  const int64_t frame_nb,
+  const int frame_nb,
   DemuxFrame *const demux_frame) noexcept -> bool
 {
   const auto *impl = demux_ctx.impl.get();

@@ -45,9 +45,10 @@ struct MuxImpl
   AVPacket *enc_pkt = nullptr;
   AVFrame *enc_frame = nullptr;
 
-  AVFilterGraph *graph = nullptr;
-  AVFilterContext *buffersink_ctx = nullptr;
-  AVFilterContext *buffersrc_ctx = nullptr;
+  std::unique_ptr<filter_graph_internal::FilterGraph> filter_graph;
+  // AVFilterGraph *graph = nullptr;
+  // AVFilterContext *buffersink_ctx = nullptr;
+  // AVFilterContext *buffersrc_ctx = nullptr;
   // AVFrame *dec_frame = nullptr;
 
 #if 0
@@ -241,11 +242,25 @@ struct MuxImpl
 [[nodiscard]] static auto FilterEncodeWriteFrame(AVFormatContext *ofmt_ctx,
   AVCodecContext *enc_ctx,
   AVPacket *enc_pkt,
-  AVFrame *enc_frame,
-  AVFilterContext *buffersrc_ctx,
-  AVFilterContext *buffersink_ctx,
+  AVFrame * /*enc_frame*/,
+  filter_graph_internal::FilterGraph* filter_graph,
   AVFrame *dec_frame) noexcept -> bool
 {
+  bool ok = true;
+  bool b = filter_graph->FilterFrame(dec_frame, [&](AVFrame* frame) {
+    ok = EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame);
+  });
+  return b && ok;
+
+  // bool w = true;
+  // while (filter_graph->FilterFrame(dec_frame, enc_frame)) {
+  //   enc_frame->pict_type = AV_PICTURE_TYPE_NONE;
+  //   w = EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, enc_frame);
+  //   if (!w) { break; }
+  // }
+  // return w;
+
+#if 0
   // Push the decoded frame into the filter graph.
   // NOTE(tohi): Resets the frame!
   // if (const int ret = av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, /*flags=*/0)) {
@@ -277,6 +292,7 @@ struct MuxImpl
   }
 
   return w && ret >= 0;
+#endif
 }
 
 #if 0
@@ -405,7 +421,6 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
     LogMsg(LogLevel::kInfo, "Free mux implementation\n");
     assert(impl_ptr != nullptr);// NOLINT
 
-    avfilter_graph_free(&(impl_ptr->graph));
     avcodec_free_context(&(impl_ptr->enc_ctx));
     av_frame_free(&(impl_ptr->enc_frame));
     av_packet_free(&(impl_ptr->enc_pkt));
@@ -539,14 +554,17 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
   av_dump_format(impl->ofmt_ctx, /*index=*/0, params.filename.c_str(), /*is_output=*/1);
 
   filter_graph_internal::FilterGraphArgs fg_args = {};
-  fg_args.codec_ctx = impl->enc_ctx;
-  fg_args.filter_graph = params.filter_graph;
+  fg_args.filter_descr = params.filter_graph;
   fg_args.sws_flags = params.sws_flags;
+  fg_args.in.width = impl->enc_ctx->width;
+  fg_args.in.height = impl->enc_ctx->height;
   fg_args.in.pix_fmt = AV_PIX_FMT_GBRPF32;
-  fg_args.in.time_base = impl->enc_ctx->time_base;
+  fg_args.in.sample_aspect_ratio = impl->enc_ctx->sample_aspect_ratio;
+  fg_args.in.time_base = impl->ofmt_ctx->streams[0]->time_base;// NOLINT
   fg_args.out.pix_fmt = impl->enc_ctx->pix_fmt;
-  if (!filter_graph_internal::ConfigureVideoFilters(
-        fg_args, &(impl->graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
+  try {
+    impl->filter_graph = std::make_unique<filter_graph_internal::FilterGraph>(fg_args);
+  } catch (std::exception&) {
     return nullptr;
   }
 
@@ -595,8 +613,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
     mux_ctx.impl->enc_ctx,
     mux_ctx.impl->enc_pkt,
     mux_ctx.impl->enc_frame,
-    mux_ctx.impl->buffersrc_ctx,
-    mux_ctx.impl->buffersink_ctx,
+    mux_ctx.impl->filter_graph.get(),
     dec_frame);
 }
 
@@ -608,8 +625,7 @@ auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
         mux_ctx.impl->enc_ctx,
         mux_ctx.impl->enc_pkt,
         mux_ctx.impl->enc_frame,
-        mux_ctx.impl->buffersrc_ctx,
-        mux_ctx.impl->buffersink_ctx,
+        mux_ctx.impl->filter_graph.get(),
         /*dec_frame=*/nullptr)) {
     LogMsg(LogLevel::kError, "Cannot flush filter\n");
     return false;

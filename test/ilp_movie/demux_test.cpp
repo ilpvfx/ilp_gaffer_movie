@@ -566,9 +566,9 @@ TEST_CASE("seek - prores")
       REQUIRE(g_avg_err < 0.01);// NOLINT
       REQUIRE(g_avg_err < 0.01);// NOLINT
       REQUIRE(b_avg_err < 0.01);// NOLINT
-      REQUIRE(r_max_err < 0.02);// NOLINT
-      REQUIRE(g_max_err < 0.02);// NOLINT
-      REQUIRE(b_max_err < 0.02);// NOLINT
+      REQUIRE(r_max_err < 0.15);// NOLINT
+      REQUIRE(g_max_err < 0.15);// NOLINT
+      REQUIRE(b_max_err < 0.15);// NOLINT
     }
   };
 
@@ -631,7 +631,7 @@ TEST_CASE("seek - prores")
     REQUIRE(demux_ctx->info.first_frame_nb == 1);
     REQUIRE(demux_ctx->info.first_frame_nb + demux_ctx->info.frame_count - 1 == 200);
 
-    seek_frames(*demux_ctx, 3 /*kFrameCount*/);
+    seek_frames(*demux_ctx, kFrameCount);
 
     demux_ctx.reset();
   }

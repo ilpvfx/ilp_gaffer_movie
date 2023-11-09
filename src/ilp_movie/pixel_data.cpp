@@ -6,6 +6,7 @@
 #include <type_traits>// std::remove_pointer_t
 
 #include <ilp_movie/demux.hpp>// ilp_movie::DemuxFrame
+#include <ilp_movie/decoder.hpp>// ilp_movie::DecodedVideoFrame
 
 [[nodiscard]] static constexpr auto ChannelIndex(const ilp_movie::Channel ch) noexcept
   -> std::optional<std::size_t>
@@ -37,7 +38,7 @@
   return image_size * channel_index;
 }
 
-template <typename PixelT>
+template<typename PixelT>
 [[nodiscard]] static constexpr auto ChannelDataImpl(const int w,
   const int h,
   const ilp_movie::Channel ch,
@@ -85,6 +86,18 @@ auto ChannelData(DemuxFrame *const f, const Channel ch) noexcept -> PixelData<fl
 {
   assert(f != nullptr);// NOLINT
   return ChannelData(f->width, f->height, ch, f->buf.data.get(), f->buf.count);
+}
+
+auto ChannelData(const DecodedVideoFrame &dvf, const Channel ch) noexcept -> PixelData<const float>
+{
+  return ChannelData(
+    dvf.width, dvf.height, ch, static_cast<const float *>(dvf.buf.data.get()), dvf.buf.count);
+}
+
+auto ChannelData(DecodedVideoFrame *const dvf, const Channel ch) noexcept -> PixelData<float>
+{
+  assert(dvf != nullptr);// NOLINT
+  return ChannelData(dvf->width, dvf->height, ch, dvf->buf.data.get(), dvf->buf.count);
 }
 
 }// namespace ilp_movie

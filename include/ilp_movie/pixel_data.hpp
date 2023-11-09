@@ -8,6 +8,7 @@
 namespace ilp_movie {
 
 struct DemuxFrame;
+struct DecodedVideoFrame;
 
 // Simple span.
 template<typename PixelT = const float> struct PixelData
@@ -34,6 +35,12 @@ template<typename PixelT>
   -> PixelData<const float>;
 
 [[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(DemuxFrame *f, Channel ch) noexcept
+  -> PixelData<float>;
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(const DecodedVideoFrame &dvf, Channel ch) noexcept
+  -> PixelData<const float>;
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto ChannelData(DecodedVideoFrame *dvf, Channel ch) noexcept
   -> PixelData<float>;
 
 }// namespace ilp_movie
