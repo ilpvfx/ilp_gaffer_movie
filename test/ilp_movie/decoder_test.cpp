@@ -14,6 +14,8 @@
 
 using namespace std::literals;// "hello"sv
 
+namespace {
+
 // NOTE(tohi): The mux frame channel pointers should be initialized so that they refer to the demux
 //             frame buffer.
 struct FramePair
@@ -22,7 +24,7 @@ struct FramePair
   ilp_movie::DecodedVideoFrame dec_frame = {};
 };
 
-[[nodiscard]] static auto MakeFramePair(const int w,
+[[nodiscard]] auto MakeFramePair(const int w,
   const int h,
   const int frame_nb,
   const ilp_movie::PixelFormat pix_fmt,
@@ -123,7 +125,106 @@ struct FramePair
   return true;
 }
 
-namespace {
+auto WriteFrames(const ilp_movie::MuxContext &mux_ctx, const int frame_count) -> bool
+{
+  if (!(frame_count > 0)) { return false; }
+
+  for (int i = 0; i < frame_count; ++i) {
+    FramePair fp{};
+    if (!MakeFramePair(
+          mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixelFormat::kRGB, &fp)) {
+      return false;
+    }
+    if (!ilp_movie::MuxWriteFrame(mux_ctx, fp.mux_frame)) { return false; }
+  }
+  return ilp_movie::MuxFinish(mux_ctx);
+}
+
+struct SeekStats
+{
+  double r_max_err = std::numeric_limits<double>::lowest();
+  double g_max_err = std::numeric_limits<double>::lowest();
+  double b_max_err = std::numeric_limits<double>::lowest();
+  double r_avg_err = 0.0;
+  double g_avg_err = 0.0;
+  double b_avg_err = 0.0;
+  std::size_t num_key_frames = 0U;
+};
+
+auto SeekFrames(ilp_movie::Decoder &decoder, const int frame_count) -> std::optional<SeekStats>
+{
+  SeekStats ss{};
+
+#if 1
+  std::vector<int> frame_range(static_cast<std::size_t>(frame_count));
+  const int start_value = 1;
+  std::iota(std::begin(frame_range), std::end(frame_range), start_value);
+  auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
+  std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
+#else
+  std::vector<int> frame_range;
+  frame_range.push_back(std::max(1, frame_count / 2));
+#endif
+
+  for (const auto frame_nb : frame_range) {
+    ilp_movie::DecodedVideoFrame seek_frame = {};
+    if (!decoder.DecodeVideoFrame(/*stream_index=*/0, frame_nb, /*out*/ seek_frame)) {
+      return std::nullopt;
+    }
+    if (!(seek_frame.frame_nb == frame_nb)) { return std::nullopt; }
+    if (seek_frame.key_frame) { ++ss.num_key_frames; }
+
+    FramePair fp = {};
+    if (!MakeFramePair(
+          seek_frame.width, seek_frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &fp)) {
+      return std::nullopt;
+    }
+
+    const auto r = ilp_movie::ChannelData(seek_frame.width,
+      seek_frame.height,
+      ilp_movie::Channel::kRed,
+      seek_frame.buf.data.get(),
+      seek_frame.buf.count);
+    const auto g = ilp_movie::ChannelData(seek_frame.width,
+      seek_frame.height,
+      ilp_movie::Channel::kGreen,
+      seek_frame.buf.data.get(),
+      seek_frame.buf.count);
+    const auto b = ilp_movie::ChannelData(seek_frame.width,
+      seek_frame.height,
+      ilp_movie::Channel::kBlue,
+      seek_frame.buf.data.get(),
+      seek_frame.buf.count);
+    for (std::size_t i = 0; i < r.count; ++i) {
+      const auto err = static_cast<double>(std::abs(r.data[i] - fp.mux_frame.r[i]));// NOLINT
+      ss.r_avg_err += err;
+      ss.r_max_err = std::max(err, ss.r_max_err);
+    }
+    ss.r_avg_err /= static_cast<double>(r.count);
+    for (std::size_t i = 0; i < g.count; ++i) {
+      const auto err = static_cast<double>(std::abs(g.data[i] - fp.mux_frame.g[i]));// NOLINT
+      ss.g_avg_err += err;
+      ss.g_max_err = std::max(err, ss.g_max_err);
+    }
+    ss.g_avg_err /= static_cast<double>(g.count);
+    for (std::size_t i = 0; i < b.count; ++i) {
+      const auto err = static_cast<double>(std::abs(b.data[i] - fp.mux_frame.b[i]));// NOLINT
+      ss.b_avg_err += err;
+      ss.b_max_err = std::max(err, ss.b_max_err);
+    }
+    ss.b_avg_err /= static_cast<double>(b.count);
+
+    {// Debug.
+      std::ostringstream oss;
+      oss << "Frame " << frame_nb << "\n"
+          << "r | avg: " << ss.r_avg_err << ", max: " << ss.r_max_err << "\n"
+          << "g | avg: " << ss.g_avg_err << ", max: " << ss.g_max_err << "\n"
+          << "b | avg: " << ss.b_avg_err << ", max: " << ss.b_max_err << "\n";
+      ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
+    }
+  }
+  return ss;
+}
 
 TEST_CASE("seek - prores")
 {
@@ -139,101 +240,6 @@ TEST_CASE("seek - prores")
       log_lines.clear();
     }
     return cond;
-  };
-
-  const auto write_frames = [&](const ilp_movie::MuxContext &mux_ctx, const int frame_count) {
-    REQUIRE(dump_log_on_fail(frame_count > 0));
-
-    for (int i = 0; i < frame_count; ++i) {
-      FramePair f = {};
-      REQUIRE(dump_log_on_fail(MakeFramePair(
-        mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixelFormat::kRGB, &f)));
-      REQUIRE(dump_log_on_fail(ilp_movie::MuxWriteFrame(mux_ctx, f.mux_frame)));
-    }
-    REQUIRE(dump_log_on_fail(ilp_movie::MuxFinish(mux_ctx)));
-  };
-
-  const auto seek_frames = [&](ilp_movie::Decoder &decoder, const int frame_count) {
-    REQUIRE(frame_count > 0);
-
-#if 1
-    std::vector<int> frame_range(static_cast<std::size_t>(frame_count));
-    const int start_value = 1;
-    std::iota(std::begin(frame_range), std::end(frame_range), start_value);
-    auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
-    std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
-#else
-    std::vector<int> frame_range;
-    frame_range.push_back(std::max(1, frame_count / 2));
-#endif
-
-    for (const auto frame_nb : frame_range) {
-      ilp_movie::DecodedVideoFrame seek_frame = {};
-      REQUIRE(dump_log_on_fail(
-        decoder.DecodeVideoFrame(/*stream_index=*/0, frame_nb, /*out*/ seek_frame)));
-      REQUIRE(seek_frame.frame_nb == frame_nb);
-      REQUIRE(seek_frame.key_frame);// ProRes is all intraframe, so all key frames!
-
-      FramePair f = {};
-      REQUIRE(MakeFramePair(
-        seek_frame.width, seek_frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &f));
-
-      const auto r = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kRed,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      const auto g = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kGreen,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      const auto b = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kBlue,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      double r_max_err = std::numeric_limits<double>::lowest();
-      double g_max_err = std::numeric_limits<double>::lowest();
-      double b_max_err = std::numeric_limits<double>::lowest();
-      double r_avg_err = 0.0;
-      double g_avg_err = 0.0;
-      double b_avg_err = 0.0;
-      for (std::size_t i = 0; i < r.count; ++i) {
-        const auto err = static_cast<double>(std::abs(r.data[i] - f.mux_frame.r[i]));// NOLINT
-        r_avg_err += err;
-        r_max_err = std::max(err, r_max_err);
-      }
-      r_avg_err /= static_cast<double>(r.count);
-      for (std::size_t i = 0; i < g.count; ++i) {
-        const auto err = static_cast<double>(std::abs(g.data[i] - f.mux_frame.g[i]));// NOLINT
-        g_avg_err += err;
-        g_max_err = std::max(err, g_max_err);
-      }
-      g_avg_err /= static_cast<double>(g.count);
-      for (std::size_t i = 0; i < b.count; ++i) {
-        const auto err = static_cast<double>(std::abs(b.data[i] - f.mux_frame.b[i]));// NOLINT
-        b_avg_err += err;
-        b_max_err = std::max(err, b_max_err);
-      }
-      b_avg_err /= static_cast<double>(b.count);
-
-      {
-        std::ostringstream oss;
-        oss << "Frame " << frame_nb << "\n"
-            << "r | avg: " << r_avg_err << ", max: " << r_max_err << "\n"
-            << "g | avg: " << g_avg_err << ", max: " << g_max_err << "\n"
-            << "b | avg: " << b_avg_err << ", max: " << b_max_err << "\n";
-        ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
-      }
-
-      REQUIRE(g_avg_err < 0.01);// NOLINT
-      REQUIRE(g_avg_err < 0.01);// NOLINT
-      REQUIRE(b_avg_err < 0.01);// NOLINT
-      REQUIRE(r_max_err < 0.15);// NOLINT
-      REQUIRE(g_max_err < 0.15);// NOLINT
-      REQUIRE(b_max_err < 0.15);// NOLINT
-    }
   };
 
   SECTION("RGB")
@@ -260,53 +266,61 @@ TEST_CASE("seek - prores")
     constexpr int kHeight = 480;
     constexpr int kFrameCount = 200;
 
-    // Write/mux.
-    ilp_movie::ProRes::EncodeParameters enc_params = {};
-    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;// -profile:v 3
-    auto mux_params = ilp_movie::MakeMuxParameters(kFilename,
-      kWidth,
-      kHeight,
-      /*frame_rate=*/24.0,// -r 24
-      enc_params);
-    REQUIRE(mux_params.has_value());
-    REQUIRE(mux_params->pix_fmt == "yuv422p10le"sv);// -pix_fmt yuv422p10le
-    mux_params->color_range = ilp_movie::ColorRange::kTv;// -color_range tv
-    mux_params->colorspace = ilp_movie::Colorspace::kBt709;// -colorspace bt709
-    mux_params->color_primaries = ilp_movie::Colorspace::kBt709;// -color_primaries bt709
-    mux_params->color_trc = ilp_movie::ColorTrc::kIec61966_2_1;// -color_trc iec61966-2-1
-    // -vf "scale=in_color_matrix=bt709:out_color_matrix=bt709"
-    mux_params->filter_graph = "scale=in_color_matrix=bt709:out_color_matrix=bt709"sv;
-    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
-    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
-    write_frames(*mux_ctx, kFrameCount);
-    mux_ctx.reset();
-
-    // Read/decode
-    std::unique_ptr<ilp_movie::Decoder> decoder;
-    try {
-      decoder = std::make_unique<ilp_movie::Decoder>(std::string{ kFilename });
-    } catch (std::exception &) {
-      REQUIRE(dump_log_on_fail(false));
+    {// Write.
+      ilp_movie::ProRes::EncodeParameters enc_params = {};
+      enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;// -profile:v 3
+      auto mux_params = ilp_movie::MakeMuxParameters(kFilename,
+        kWidth,
+        kHeight,
+        /*frame_rate=*/24.0,// -r 24
+        enc_params);
+      REQUIRE(dump_log_on_fail(mux_params.has_value()));
+      REQUIRE(dump_log_on_fail(mux_params->pix_fmt == "yuv422p10le"sv));// -pix_fmt yuv422p10le
+      mux_params->color_range = ilp_movie::ColorRange::kTv;// -color_range tv
+      mux_params->colorspace = ilp_movie::Colorspace::kBt709;// -colorspace bt709
+      mux_params->color_primaries = ilp_movie::Colorspace::kBt709;// -color_primaries bt709
+      mux_params->color_trc = ilp_movie::ColorTrc::kIec61966_2_1;// -color_trc iec61966-2-1
+      // -vf "scale=in_color_matrix=bt709:out_color_matrix=bt709"
+      mux_params->filter_graph = "scale=in_color_matrix=bt709:out_color_matrix=bt709"sv;
+      auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+      REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+      REQUIRE(dump_log_on_fail(WriteFrames(*mux_ctx, kFrameCount)));
+      mux_ctx.reset();
     }
 
-    // demux_params.filter_graph =
-    //   //"scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709";
-    //   "scale=in_color_matrix=bt709:out_color_matrix=bt709";
+    {// Read.
+      std::unique_ptr<ilp_movie::Decoder> decoder;
+      try {
+        decoder = std::make_unique<ilp_movie::Decoder>(std::string{ kFilename });
+      } catch (std::exception &) {
+        REQUIRE(dump_log_on_fail(false));
+      }
 
-    std::vector<ilp_movie::DecodeVideoStreamInfo> stream_info = decoder->StreamInfo();
-    REQUIRE(stream_info.size() == 1U);
-    REQUIRE(stream_info[0].stream_index == 0);
-    REQUIRE(stream_info[0].is_best == true);
-    REQUIRE(stream_info[0].width == kWidth);
-    REQUIRE(stream_info[0].height == kHeight);
-    REQUIRE(stream_info[0].first_frame_nb == 1);
-    REQUIRE(stream_info[0].frame_count == 200);
+      std::vector<ilp_movie::DecodeVideoStreamInfo> stream_info = decoder->StreamInfo();
+      REQUIRE(dump_log_on_fail(stream_info.size() == 1U));
+      REQUIRE(dump_log_on_fail(stream_info[0].stream_index == 0));
+      REQUIRE(dump_log_on_fail(stream_info[0].is_best == true));
+      REQUIRE(dump_log_on_fail(stream_info[0].width == kWidth));
+      REQUIRE(dump_log_on_fail(stream_info[0].height == kHeight));
+      REQUIRE(dump_log_on_fail(stream_info[0].first_frame_nb == 1));
+      REQUIRE(dump_log_on_fail(stream_info[0].frame_count == 200));
 
-    REQUIRE(decoder->SetStreamFilterGraph(stream_info[0].stream_index,
-      /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709"));
+      //"scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709";
+      REQUIRE(decoder->SetStreamFilterGraph(stream_info[0].stream_index,
+        /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709"));
 
-    seek_frames(*decoder, kFrameCount);
-    decoder.reset();
+      const auto ss = SeekFrames(*decoder, kFrameCount);
+      REQUIRE(dump_log_on_fail(ss.has_value()));
+      REQUIRE(dump_log_on_fail(
+        ss->num_key_frames == kFrameCount));// ProRes is all intraframe, so all key frames!
+      REQUIRE(dump_log_on_fail(0.0 <= ss->r_avg_err && ss->r_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->g_avg_err && ss->g_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->b_avg_err && ss->b_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->r_max_err && ss->r_max_err < 0.15));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->g_max_err && ss->g_max_err < 0.15));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->b_max_err && ss->b_max_err < 0.15));// NOLINT
+      decoder.reset();
+    }
   }
 
   // dump_log_on_fail(false);// TMP!!
@@ -318,6 +332,7 @@ TEST_CASE("seek - h.264")
   ilp_movie::SetLogCallback(
     [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
+
   const auto dump_log_on_fail = [&](const bool cond) {
     if (!cond) {
       // Dump log before exiting.
@@ -327,131 +342,50 @@ TEST_CASE("seek - h.264")
     return cond;
   };
 
-  const auto write_frames = [&](const ilp_movie::MuxContext &mux_ctx, const int frame_count) {
-    REQUIRE(dump_log_on_fail(frame_count > 0));
-
-    for (int i = 0; i < frame_count; ++i) {
-      FramePair f = {};
-      REQUIRE(dump_log_on_fail(MakeFramePair(
-        mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixelFormat::kRGB, &f)));
-      REQUIRE(dump_log_on_fail(ilp_movie::MuxWriteFrame(mux_ctx, f.mux_frame)));
-    }
-    REQUIRE(dump_log_on_fail(ilp_movie::MuxFinish(mux_ctx)));
-  };
-
-  const auto seek_frames = [&](ilp_movie::Decoder &decoder, const int frame_count) {
-    REQUIRE(frame_count > 0);
-
-#if 0
-    std::vector<int> frame_range;
-    frame_range.push_back(80);
-#else
-    std::vector<int> frame_range(static_cast<std::size_t>(frame_count - 1));
-    std::iota(std::begin(frame_range), std::end(frame_range), 1);
-    auto rng = std::default_random_engine{ /*seed=*/1981 };// NOLINT
-    std::shuffle(std::begin(frame_range), std::end(frame_range), rng);
-#endif
-
-    for (const auto frame_nb : frame_range) {
-      ilp_movie::DecodedVideoFrame seek_frame = {};
-      REQUIRE(dump_log_on_fail(
-        decoder.DecodeVideoFrame(/*stream_index=*/0, frame_nb, /*out*/ seek_frame)));
-      REQUIRE(seek_frame.frame_nb == frame_nb);
-
-      FramePair f = {};
-      REQUIRE(MakeFramePair(
-        seek_frame.width, seek_frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &f));
-
-      const auto r = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kRed,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      const auto g = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kGreen,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      const auto b = ilp_movie::ChannelData(seek_frame.width,
-        seek_frame.height,
-        ilp_movie::Channel::kBlue,
-        seek_frame.buf.data.get(),
-        seek_frame.buf.count);
-      float r_max_err = std::numeric_limits<float>::lowest();
-      float g_max_err = std::numeric_limits<float>::lowest();
-      float b_max_err = std::numeric_limits<float>::lowest();
-      float r_avg_err = 0.F;
-      float g_avg_err = 0.F;
-      float b_avg_err = 0.F;
-      for (std::size_t i = 0; i < r.count; ++i) {
-        const float err = std::abs(r.data[i] - f.mux_frame.r[i]);// NOLINT
-        r_avg_err += err;
-        r_max_err = std::max(err, r_max_err);
-      }
-      r_avg_err /= static_cast<float>(r.count);
-      for (std::size_t i = 0; i < g.count; ++i) {
-        const float err = std::abs(g.data[i] - f.mux_frame.g[i]);// NOLINT
-        g_avg_err += err;
-        g_max_err = std::max(err, g_max_err);
-      }
-      g_avg_err /= static_cast<float>(g.count);
-      for (std::size_t i = 0; i < b.count; ++i) {
-        const float err = std::abs(b.data[i] - f.mux_frame.b[i]);// NOLINT
-        b_avg_err += err;
-        b_max_err = std::max(err, b_max_err);
-      }
-      b_avg_err /= static_cast<float>(b.count);
-
-      {
-        std::ostringstream oss;
-        oss << "Frame " << frame_nb << "\n"
-            << "r | avg: " << r_avg_err << ", max: " << r_max_err << "\n"
-            << "g | avg: " << g_avg_err << ", max: " << g_max_err << "\n"
-            << "b | avg: " << b_avg_err << ", max: " << b_max_err << "\n";
-        ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
-      }
-
-      REQUIRE(0.F <= r_avg_err);// NOLINT
-      REQUIRE(0.F <= g_avg_err);// NOLINT
-      REQUIRE(0.F <= b_avg_err);// NOLINT
-      REQUIRE(r_max_err < 0.25F);// NOLINT
-      REQUIRE(g_max_err < 0.25F);// NOLINT
-      REQUIRE(b_max_err < 0.25F);// NOLINT
-    }
-  };
-
-
   SECTION("RGB")
   {
     const char *const kFilename = "/tmp/test_data/demux_test_h264.mp4";
+    constexpr int kWidth = 640;
+    constexpr int kHeight = 480;
     constexpr int kFrameCount = 200;
 
-    // Write/mux
-
-
-    ilp_movie::MuxParameters mux_params =
-      ilp_movie::MakeMuxParameters(kFilename, 512, 512, 24.0, ilp_movie::H264::EncodeParameters{})
-        .value();
-    auto mux_ctx = ilp_movie::MakeMuxContext(mux_params);
-    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
-    write_frames(*mux_ctx, kFrameCount);
-    mux_ctx.reset();
-
-    // Read/demux
-    std::unique_ptr<ilp_movie::Decoder> decoder;
-    try {
-      decoder = std::make_unique<ilp_movie::Decoder>(std::string{ kFilename });
-    } catch (std::exception &) {
-      REQUIRE(dump_log_on_fail(false));
+    {// Write.
+      auto mux_params = ilp_movie::MakeMuxParameters(
+        kFilename, kWidth, kHeight, 24.0, ilp_movie::H264::EncodeParameters{});
+      REQUIRE(dump_log_on_fail(mux_params.has_value()));
+      auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+      REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+      REQUIRE(dump_log_on_fail(WriteFrames(*mux_ctx, kFrameCount)));
+      mux_ctx.reset();
     }
 
-    // REQUIRE(demux_ctx->info.width == 512);
-    // REQUIRE(demux_ctx->info.height == 512);
-    // REQUIRE(demux_ctx->info.first_frame_nb == 1);
-    // REQUIRE(demux_ctx->info.first_frame_nb + demux_ctx->info.frame_count - 1 == 200);
+    {// Read.
+      std::unique_ptr<ilp_movie::Decoder> decoder;
+      try {
+        decoder = std::make_unique<ilp_movie::Decoder>(std::string{ kFilename });
+      } catch (std::exception &) {
+        REQUIRE(dump_log_on_fail(false));
+      }
 
-    seek_frames(*decoder, 3 /* kFrameCount*/);
-    decoder.reset();
+      std::vector<ilp_movie::DecodeVideoStreamInfo> stream_info = decoder->StreamInfo();
+      REQUIRE(dump_log_on_fail(stream_info.size() == 1U));
+      REQUIRE(dump_log_on_fail(stream_info[0].stream_index == 0));
+      REQUIRE(dump_log_on_fail(stream_info[0].is_best == true));
+      REQUIRE(dump_log_on_fail(stream_info[0].width == kWidth));
+      REQUIRE(dump_log_on_fail(stream_info[0].height == kHeight));
+      REQUIRE(dump_log_on_fail(stream_info[0].first_frame_nb == 1));
+      REQUIRE(dump_log_on_fail(stream_info[0].frame_count == kFrameCount));
+
+      const auto ss = SeekFrames(*decoder, kFrameCount);
+      REQUIRE(dump_log_on_fail(ss.has_value()));
+      REQUIRE(dump_log_on_fail(0.0 <= ss->r_avg_err && ss->r_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->g_avg_err && ss->g_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->b_avg_err && ss->b_avg_err < 0.01));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->r_max_err && ss->r_max_err < 0.15));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->g_max_err && ss->g_max_err < 0.15));// NOLINT
+      REQUIRE(dump_log_on_fail(0.0 <= ss->b_max_err && ss->b_max_err < 0.15));// NOLINT
+      decoder.reset();
+    }
   }
 
   dump_log_on_fail(false);// TMP!!

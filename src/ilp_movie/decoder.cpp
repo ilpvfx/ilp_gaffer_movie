@@ -179,8 +179,10 @@ public:
   {
     int ret = avcodec_send_packet(_av_codec_context, av_packet);
 
-    // Packet has been sent to the decoder.
-    av_packet_unref(av_packet);
+    // Packet has been sent to the decoder. Check if it is a "flush packet".
+    if (av_packet != nullptr) {
+      av_packet_unref(av_packet);
+    }
 
     if (ret < 0) {
       log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
