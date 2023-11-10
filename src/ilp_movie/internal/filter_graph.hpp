@@ -57,8 +57,8 @@ public:
   FilterGraph(const FilterGraph &rhs) = delete;
   FilterGraph &operator=(const FilterGraph &rhs) = delete;
 
-  [[nodiscard]] auto FilterFrame(AVFrame *in_frame,
-    const std::function<void(AVFrame *)> &filter_func) const noexcept -> bool;
+  [[nodiscard]] auto FilterFrames(AVFrame *in_frame,
+    const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool;
 
 private:
   const FilterGraphImpl *Pimpl() const { return _pimpl.get(); }

@@ -59,11 +59,11 @@ public:
     if (_av_stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
       if (thread_count > 0) {
 #if 0// NOTE(tohi): experimental, not tested.
-        if (st->codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
+        if (stream->codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
           _av_codec_context->thread_count = thread_count;
           _av_codec_context->thread_type = FF_THREAD_SLICE;// NOLINT
         }
-        if (st->codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
+        if (stream->codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
           _av_codec_context->thread_count = thread_count;
           _av_codec_context->thread_type |= FF_THREAD_FRAME;// NOLINT
         }
@@ -121,6 +121,12 @@ public:
       _frame_rate.den = 1;
     }
 #endif
+
+    _av_frame = av_frame_alloc();
+    if (_av_frame == nullptr) {
+      log_utils_internal::LogAvError("Cannot allocate frame", AVERROR(ENOMEM));
+      exit_failure();
+    }
   }
 
   ~Stream() { _Free(); }
@@ -178,14 +184,51 @@ public:
     return _start_time + (den > 0 ? (num / den) : num);
   }
 
+  [[nodiscard]] auto ReceiveFrames(AVPacket *av_packet,
+    const std::function<bool(AVFrame *)> &frame_func) noexcept -> bool
+  {
+    int ret = avcodec_send_packet(_av_codec_context, av_packet);
+
+    // Packet has been sent to the decoder.
+    av_packet_unref(av_packet);
+
+    if (ret < 0) {
+      log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
+      return false;
+    }
+
+    bool keep_going = true;
+    while (ret >= 0 && keep_going) {
+      ret = avcodec_receive_frame(_av_codec_context, _av_frame);
+      if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {// NOLINT
+        // Not really an error, just time to quit.
+        ret = 0;
+        break;
+      }
+      if (ret < 0) {
+        // Legitimate decoding error.
+        log_utils_internal::LogAvError("Cannot decode frame", ret);
+        av_frame_unref(_av_frame);
+        break;
+      }
+
+      _av_frame->pts = _av_frame->best_effort_timestamp;
+      keep_going = frame_func(_av_frame);
+      av_frame_unref(_av_frame);
+    }
+    return ret >= 0 && keep_going;
+  }
+
 private:
   void _Free() noexcept
   {
     if (_av_codec_context != nullptr) { avcodec_free_context(&_av_codec_context); }
+    if (_av_frame != nullptr) { av_frame_free(&_av_frame); }
   }
 
   AVStream *_av_stream = nullptr;
   AVCodecContext *_av_codec_context = nullptr;
+  AVFrame *_av_frame = nullptr;
 
   int64_t _start_time = 0;
   int64_t _frame_count = 0;
@@ -228,10 +271,16 @@ private:
 
   int _best_video_stream = -1;
 
-  std::map<int, std::unique_ptr<Stream>> _streams;
-  std::map<int, std::unique_ptr<filter_graph_internal::FilterGraph>> _filter_graphs;
-  // std::vector<DecodeVideoStreamInfo> _stream_info;
-  //  int _decode_stream = -1;
+  struct FilteredStream
+  {
+    std::unique_ptr<Stream> stream;
+    std::unique_ptr<filter_graph_internal::FilterGraph> filter_graph;
+  };
+
+  std::map<int, FilteredStream> _streams;
+  // std::map<int, std::unique_ptr<filter_graph_internal::FilterGraph>> _filter_graphs;
+  //  std::vector<DecodeVideoStreamInfo> _stream_info;
+  //   int _decode_stream = -1;
 };
 
 DecoderImpl::DecoderImpl(std::string path) : _path{ std::move(path) }
@@ -285,103 +334,24 @@ DecoderImpl::DecoderImpl(std::string path) : _path{ std::move(path) }
     AVStream *si = _av_format_ctx->streams[i];// NOLINT
     if (si->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
       try {
-        _streams[si->index] = std::make_unique<Stream>(_av_format_ctx, si, kThreadCount);
+        auto stream = std::make_unique<Stream>(_av_format_ctx, si, kThreadCount);
+        filter_graph_internal::FilterGraphArgs fg_args{};
+        fg_args.filter_descr = "null";
+        fg_args.sws_flags = "";
+        fg_args.in.width = stream->CodecContext()->width;
+        fg_args.in.height = stream->CodecContext()->height;
+        fg_args.in.pix_fmt = stream->CodecContext()->pix_fmt;
+        fg_args.in.sample_aspect_ratio = stream->CodecContext()->sample_aspect_ratio;
+        fg_args.in.time_base = stream->Get()->time_base;
+        fg_args.out.pix_fmt = AV_PIX_FMT_GBRPF32;
+        auto filter_graph = std::make_unique<filter_graph_internal::FilterGraph>(fg_args);
+        _streams[si->index] = { std::move(stream), std::move(filter_graph) };
       } catch (std::invalid_argument &e) {
         // todo!!!
         // re-throw!?
       }
     }
   }
-
-
-#if 0
-  // if we aren't loading a specific (known) stream, we load all streams to get
-  // the details on the source. We also try and find out which video and/or
-  // audio tracks are the 'best'.
-  int best_video_stream = stream_id_.empty() ? av_find_best_stream(_av_format_ctx,
-                            AVMEDIA_TYPE_VIDEO,
-                            /*wanted_stream_nb=*/-1,
-                            /*related_stream=*/-1,
-                            /*decoder_ret=*/nullptr,
-                            /*flags=*/0)
-                                             : -1;
-
-
-  StreamPtr primary_video_stream;
-
-  for (auto &s : streams_) {
-    auto &stream = s.second;
-    if (stream->codec_type() == AVMEDIA_TYPE_VIDEO && !primary_video_stream) {
-      if (best_video_stream == -1 || stream->stream_index() == best_video_stream) {
-        primary_video_stream = stream;
-      }
-    }
-  }
-  else if (stream->stream_type() == TIMECODE_STREAM && !timecode_stream_)
-  {
-    timecode_stream_ = stream;
-  }
-
-
-  if (primary_video_stream && !primary_video_stream->is_single_frame()) {
-
-    // xSTUDIO requires that streams within a given source have the same frame rate.
-    // We force other streams to have a frame rate that matches the 'primary' video
-    // stream. Particulary for audio streams, which typically deliver frames at a
-    // different rate to video, we then re-parcel audio samples in a sort-of pull-down
-    // to match the video rate. See the note immediately below for a bit more detail.
-    for (auto &stream : streams_) {
-
-      stream.second->set_virtual_frame_rate(primary_video_stream->frame_rate());
-    }
-
-  } else if (primary_audio_stream) {
-
-    // What's happening here is for any audio only sources we enforce a frame rate of 60fps.
-    // We do this because ffmpeg doesn't usually tell us the duration of audio frames (and
-    // therefore the frame rate) until we start decoding. Audio is really a 'stream' and we
-    // can't even be sure that the audio frame durations are constant. Thus, we force the
-    // frame rate here. During decode we resolve xSTUDIO's virtual frame number into the
-    // actual position in the audio stream. Audio frames coming from ffmpeg are assigned to
-    // virtual frames as accurately as possible, but there will be a mismatch between the
-    // PTS (presentation time stamp - when the samples should be played) of the ffmpeg audio
-    // frame and the PTS of the xSTUDIO frame. We deal this by recording the offset between
-    // the ffmpeg PTS and the xSTUDIO PTS. The audio playback engine will take this into
-    // account as it streams audio frames to the soundcard.
-    for (auto &stream : streams_) {
-
-      stream.second->set_virtual_frame_rate(
-        utility::FrameRate(timebase::k_flicks_one_sixtieth_second));
-    }
-  }
-
-  duration_frames_ = 0;
-  if (primary_video_stream) {
-
-    if (primary_audio_stream && primary_video_stream->is_single_frame()) {
-      // this can be the case with audio files that have a single image
-      // video stream (album cover art, for example) so we fall back on
-      // the audio stream duration
-      duration_frames_ = primary_audio_stream->duration_frames();
-    } else {
-      duration_frames_ = primary_video_stream->duration_frames();
-    }
-
-  } else if (primary_audio_stream) {
-    duration_frames_ = primary_audio_stream->duration_frames();
-  }
-
-  if (stream_id_ != "") {
-    for (auto p = streams_.begin(); p != streams_.end();) {
-      if (make_stream_id(p->first) == stream_id_) {
-        decode_stream_ = p->second;
-        p++;
-      } else {
-        p = streams_.erase(p);
-      }
-    }
-  }
-#endif
 }
 
 DecoderImpl::~DecoderImpl() { _Free(); }
@@ -389,21 +359,20 @@ DecoderImpl::~DecoderImpl() { _Free(); }
 auto DecoderImpl::StreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>
 {
   std::vector<DecodeVideoStreamInfo> r;
-  for (auto &&[index, stream] : _streams) {
-    assert(index == stream->Index());// NOLINT
+  for (auto &&[index, fs] : _streams) {
+    assert(index == fs.stream->Index());// NOLINT
     DecodeVideoStreamInfo dvsi{};
-    dvsi.stream_index = stream->Index();
+    dvsi.stream_index = fs.stream->Index();
     dvsi.is_best = (dvsi.stream_index == _best_video_stream);
-    dvsi.width = stream->Width();
-    dvsi.height = stream->Height();
-    dvsi.frame_rate.num = stream->FrameRate().num;
-    dvsi.frame_rate.den = stream->FrameRate().den;
+    dvsi.width = fs.stream->Width();
+    dvsi.height = fs.stream->Height();
+    dvsi.frame_rate = { /*.num=*/fs.stream->FrameRate().num, /*.den=*/fs.stream->FrameRate().den };
     dvsi.first_frame_nb = 1;// Good??
-    dvsi.frame_count = stream->FrameCount();
-    dvsi.pix_fmt_name = av_get_pix_fmt_name(stream->CodecContext()->pix_fmt);
-    dvsi.color_range_name = av_color_range_name(stream->CodecContext()->color_range);
-    dvsi.color_space_name = av_color_space_name(stream->CodecContext()->colorspace);
-    dvsi.color_primaries_name = av_color_primaries_name(stream->CodecContext()->color_primaries);
+    dvsi.frame_count = fs.stream->FrameCount();
+    dvsi.pix_fmt_name = av_get_pix_fmt_name(fs.stream->CodecContext()->pix_fmt);
+    dvsi.color_range_name = av_color_range_name(fs.stream->CodecContext()->color_range);
+    dvsi.color_space_name = av_color_space_name(fs.stream->CodecContext()->colorspace);
+    dvsi.color_primaries_name = av_color_primaries_name(fs.stream->CodecContext()->color_primaries);
     r.push_back(dvsi);
   }
   return r;
@@ -412,26 +381,25 @@ auto DecoderImpl::StreamInfo() const noexcept -> std::vector<DecodeVideoStreamIn
 auto DecoderImpl::SetStreamFilterGraph(const int stream_index, std::string filter_descr) noexcept
   -> bool
 {
-  const auto st_iter = _streams.find(stream_index);
-  if (st_iter == _streams.end()) {
+  const auto fs_iter = _streams.find(stream_index);
+  if (fs_iter == _streams.end()) {
     ilp_movie::LogMsg(ilp_movie::LogLevel::kWarning, "Bad stream index for filter graph\n");
     return false;
   }
-  Stream *st = st_iter->second.get();
+  Stream *stream = fs_iter->second.stream.get();
 
   filter_graph_internal::FilterGraphArgs fg_args{};
   fg_args.filter_descr = std::move(filter_descr);
-  ;
   fg_args.sws_flags = "";
-  fg_args.in.width = st->CodecContext()->width;
-  fg_args.in.height = st->CodecContext()->height;
-  fg_args.in.pix_fmt = st->CodecContext()->pix_fmt;
-  fg_args.in.sample_aspect_ratio = st->CodecContext()->sample_aspect_ratio;
-  fg_args.in.time_base = st->Get()->time_base;
+  fg_args.in.width = stream->CodecContext()->width;
+  fg_args.in.height = stream->CodecContext()->height;
+  fg_args.in.pix_fmt = stream->CodecContext()->pix_fmt;
+  fg_args.in.sample_aspect_ratio = stream->CodecContext()->sample_aspect_ratio;
+  fg_args.in.time_base = stream->Get()->time_base;
   fg_args.out.pix_fmt = AV_PIX_FMT_GBRPF32;// TODO(tohi): is this always good?
 
   try {
-    _filter_graphs[stream_index] = std::make_unique<filter_graph_internal::FilterGraph>(fg_args);
+    fs_iter->second.filter_graph = std::make_unique<filter_graph_internal::FilterGraph>(fg_args);
   } catch (std::exception &) {
     ilp_movie::LogMsg(ilp_movie::LogLevel::kWarning, "Failed constructing filter graph\n");
     return false;
@@ -443,54 +411,119 @@ auto DecoderImpl::SetStreamFilterGraph(const int stream_index, std::string filte
 auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept
   -> bool
 {
-  Stream *st = nullptr;
-  if (const auto st_iter = _streams.find(stream_index); st_iter != _streams.end()) {
-    st = st_iter->second.get();
+  Stream *stream = nullptr;
+  filter_graph_internal::FilterGraph *filter_graph = nullptr;
+  if (const auto fs_iter = _streams.find(stream_index); fs_iter != _streams.end()) {
+    stream = fs_iter->second.stream.get();
+    filter_graph = fs_iter->second.filter_graph.get();
   } else {
     // TODO: log warning
     return false;
   }
-  assert(st != nullptr);// NOLINT
+  assert(stream != nullptr);// NOLINT
+  assert(filter_graph != nullptr);// NOLINT
 
-  filter_graph_internal::FilterGraph *filter_graph = nullptr;
-  if (const auto fg_iter = _filter_graphs.find(stream_index); fg_iter != _filter_graphs.end()) {
-    filter_graph = fg_iter->second.get();
-  }
 
-  const int64_t timestamp = st->FrameToPts(frame_nb - 1);
+  const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
   constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
-  if (const int ret = av_seek_frame(_av_format_ctx, st->Index(), timestamp, kSeekFlags); ret < 0) {
+  if (const int ret = av_seek_frame(_av_format_ctx, stream->Index(), timestamp, kSeekFlags);
+      ret < 0) {
     log_utils_internal::LogAvError("Cannot seek to timestamp", ret);
     return false;
   }
 
-  avcodec_flush_buffers(st->CodecContext());
+  avcodec_flush_buffers(stream->CodecContext());
 
 
   bool got_frame = false;// TODO??!?!?
+  bool keep_going = true;
   int ret = 0;
-  do {
+  while (ret >= 0 && keep_going /*!got_frame*/) {
     // Read a packet, which for video streams corresponds to one frame.
     ret = av_read_frame(_av_format_ctx, _av_packet);
 
     // A packet was successfully read, check if was from the stream we are interested in.
-    if (ret >= 0 && _av_packet->stream_index != st->Index()) {
+    if (ret >= 0 && _av_packet->stream_index != stream->Index()) {
       // Ignore packets that are not from the video stream we are trying to read from.
       av_packet_unref(_av_packet);
       continue;
     }
 
+    // TODO(tohi): Can we seek based on packet PTS?
+
+    keep_going =
+      stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *frame) {
+        return filter_graph->FilterFrames(frame, [&](AVFrame *filt_frame) {
+          // Check if the frame has a PTS/duration that matches our seek target.
+          if (filt_frame->pts <= timestamp
+              && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
+            dvf.width = filt_frame->width;
+            dvf.height = filt_frame->height;
+            dvf.key_frame = filt_frame->key_frame > 0;
+            dvf.frame_nb = frame_nb;
+            dvf.pixel_aspect_ratio =
+              (filt_frame->sample_aspect_ratio.num == 0 && filt_frame->sample_aspect_ratio.den == 1)
+                ? 1.0
+                : av_q2d(filt_frame->sample_aspect_ratio);
+
+            dvf.pix_fmt = PixelFormat::kNone;
+            switch (filt_frame->format) {
+            case AV_PIX_FMT_GRAYF32:
+              dvf.pix_fmt = PixelFormat::kGray;
+              break;
+            case AV_PIX_FMT_GBRPF32:
+              dvf.pix_fmt = PixelFormat::kRGB;
+              break;
+            case AV_PIX_FMT_GBRAPF32:
+              dvf.pix_fmt = PixelFormat::kRGBA;
+              break;
+            default:
+              LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+              return false;// keep_going
+            }
+
+            constexpr std::array<Channel, 4> kChannels = {
+              Channel::kGreen,
+              Channel::kBlue,
+              Channel::kRed,
+              Channel::kAlpha,
+            };
+
+            const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
+            assert(0U < channel_count && channel_count < 4U);// NOLINT
+            assert(dvf.width > 0 && dvf.height > 0);// NOLINT
+
+            dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
+            dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
+            for (std::size_t i = 0U; i < channel_count; ++i) {
+              const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
+              auto pix = ChannelData(&dvf, ch);// NOLINT
+              assert(!Empty(pix));// NOLINT
+              assert(filt_frame->data[i] != nullptr);// NOLINT
+              std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+            }
+            got_frame = true;
+            return false;// keep_going
+          }
+          return true;// keep_going
+        });
+      });
+  }
+
+  return got_frame;
+
+#if 0
     if (ret < 0) {
       // Failed to read frame/packet - send flush packet to decoder.
-      ret = avcodec_send_packet(st->CodecContext(), /*avpkt=*/nullptr);
+      ret = avcodec_send_packet(stream->CodecContext(), /*avpkt=*/nullptr);
     } else {
       assert(_av_packet->pts != AV_NOPTS_VALUE);// NOLINT
       // if (_av_packet->pts == AV_NOPTS_VALUE) {
       //   ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Missing packet PTS (B-frame?)\n");
       //   return false;
       // }
-      ret = avcodec_send_packet(st->CodecContext(), _av_packet);
+      ret = avcodec_send_packet(stream->CodecContext(), _av_packet);
     }
 
     // Packet has been sent to the decoder.
@@ -501,7 +534,7 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
     }
 
     while (ret >= 0) {
-      ret = avcodec_receive_frame(st->CodecContext(), _av_frame);
+      ret = avcodec_receive_frame(stream->CodecContext(), _av_frame);
       if (ret == AVERROR_EOF) {// NOLINT
         goto end;// should this be an error if we haven't found our seek frame yet!?
       } else if (ret == AVERROR(EAGAIN)) {
@@ -575,14 +608,14 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
         }
       } else {
       }
+#endif
+// _av_frame->decode_error_flags
 
-      // _av_frame->decode_error_flags
-
-      // _av_frame->crop_top
-      // _av_frame->crop_bottom
-      // _av_frame->crop_left
-      // _av_frame->crop_right
-      // av_frame_apply_cropping(...)
+// _av_frame->crop_top
+// _av_frame->crop_bottom
+// _av_frame->crop_left
+// _av_frame->crop_right
+// av_frame_apply_cropping(...)
 #if 0
       // Check if the decoded frame has a PTS/duration that matches our seek target. If so, we will
       // push the frame through the filter graph.
@@ -640,11 +673,6 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
         // cache the frame?
       }
 #endif
-    }
-  } while (ret >= 0 && !got_frame);
-
-end:
-  return got_frame;
 }
 
 void DecoderImpl::_Free() noexcept

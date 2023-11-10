@@ -33,8 +33,8 @@ public:
   FilterGraphImpl(const FilterGraphImpl &rhs) = delete;
   FilterGraphImpl &operator=(const FilterGraphImpl &rhs) = delete;
 
-  [[nodiscard]] auto FilterFrame(AVFrame *in_frame,
-    const std::function<void(AVFrame *)> &filter_func) const noexcept -> bool;
+  [[nodiscard]] auto FilterFrames(AVFrame *in_frame,
+    const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool;
 
 private:
   void _Free() noexcept;
@@ -211,55 +211,41 @@ FilterGraphImpl::FilterGraphImpl(const FilterGraphArgs &args)
 
 FilterGraphImpl::~FilterGraphImpl() { _Free(); }
 
-auto FilterGraphImpl::FilterFrame(AVFrame *const in_frame,
-  const std::function<void(AVFrame *)> &filter_func) const noexcept -> bool
+// kError = -1
+// kDone = 0
+// kContinue = 1
+
+auto FilterGraphImpl::FilterFrames(AVFrame *const in_frame,
+  const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool
 {
   // Push the decoded frame into the filter graph.
-  if (const int ret =
-        av_buffersrc_add_frame_flags(_buffersrc_ctx, in_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
-      ret < 0) {
+  int ret = av_buffersrc_add_frame_flags(_buffersrc_ctx, in_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
+  if (ret < 0) {
     log_utils_internal::LogAvError("Cannot push frame to the filter graph", ret);
     return false;
   }
 
-  // int frame_count = 0;
-  int ret = 0;
-  // pull filtered frames from the filter graph.
-  while (true) {
+  bool keep_going = true;
+  while (ret >= 0 && keep_going) {
+    // Pull filtered frames from the filter graph.
     ret = av_buffersink_get_frame(_buffersink_ctx, _filt_frame);
     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {// NOLINT
+      // AVERROR(EAGAIN): No frames are available at this point; more input frames must be added
+      // to the filter graph to get more output.
+      //
+      // AVERROR_EOF: There will be no more output frames on this sink.
+      ret = 0;
       break;
     }
-    if (ret < 0) { break; }
-    assert(ret >= 0);// NOLINT
-    filter_func(_filt_frame);
+    if (ret < 0) {
+      // An actual error has occured.
+      log_utils_internal::LogAvError("Cannot get frame from the filter graph", ret);
+      break;
+    }
+    keep_going = filter_func(_filt_frame);
     av_frame_unref(_filt_frame);
-
-    // if (ret >= 0) {
-    //   ++frame_count;
-    //   assert(frame_count == 1);// NOLINT
-    //   // Keep going, interesting to see how many frames we get (hopefully only one).
-    // } else {
-    //   // This is the only way for the loop to end.
-    //   break;
-    // }
   }
-  assert(ret < 0);// NOLINT
-
-  // AVERROR(EAGAIN): No frames are available at this point; more input frames must be added
-  // to the filter graph to get more output.
-  //
-  // AVERROR_EOF: There will be no more output frames on this sink.
-  //
-  // These are not really errors, at least not if we already managed to read one frame.
-  const bool err = ret != AVERROR(EAGAIN) && ret != AVERROR_EOF;// NOLINT
-  if (err) {
-    // An actual error has occured.
-    log_utils_internal::LogAvError("Cannot get frame from the filter graph", ret);
-  }
-
-  // We are expecting to get exactly one frame.
-  return !err;// && frame_count == 1;
+  return ret >= 0 && keep_going;
 }
 
 void FilterGraphImpl::_Free() noexcept
@@ -276,10 +262,10 @@ FilterGraph::FilterGraph(const FilterGraphArgs &args)
 
 FilterGraph::~FilterGraph() = default;
 
-auto FilterGraph::FilterFrame(AVFrame *const in_frame,
-  const std::function<void(AVFrame *)> &filter_func) const noexcept -> bool
+auto FilterGraph::FilterFrames(AVFrame *const in_frame,
+  const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool
 {
-  return Pimpl()->FilterFrame(in_frame, filter_func);
+  return Pimpl()->FilterFrames(in_frame, filter_func);
 }
 
 #if 0

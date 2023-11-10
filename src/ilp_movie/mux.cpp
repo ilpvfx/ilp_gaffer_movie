@@ -247,8 +247,8 @@ struct MuxImpl
   AVFrame *dec_frame) noexcept -> bool
 {
   bool ok = true;
-  bool b = filter_graph->FilterFrame(dec_frame, [&](AVFrame* frame) {
-    ok = EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame);
+  bool b = filter_graph->FilterFrames(dec_frame, [&](AVFrame* frame) {
+    return EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame);
   });
   return b && ok;
 
