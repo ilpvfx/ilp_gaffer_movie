@@ -1,9 +1,9 @@
 #include "ilp_movie/decoder.hpp"
 
-#include <cassert>
+#include <cassert>// assert
 #include <cstdint>// int64_t
 #include <cstring>// std::memcpy
-#include <map>//std::map
+#include <map>// std::map
 
 #include <ilp_movie/pixel_data.hpp>
 #include <internal/filter_graph.hpp>
@@ -32,7 +32,7 @@ namespace {
 class Stream
 {
 public:
-  explicit Stream(AVFormatContext *av_fmt_ctx,
+  explicit Stream(AVFormatContext *const av_fmt_ctx,
     AVStream *const av_stream,
     const int thread_count = 0)
     : _av_stream(av_stream)
@@ -83,6 +83,11 @@ public:
         exit_failure();
       }
 
+      _av_frame = av_frame_alloc();
+      if (_av_frame == nullptr) {
+        log_utils_internal::LogAvError("Cannot allocate frame", AVERROR(ENOMEM));
+        exit_failure();
+      }
 #if 0
       _av_codec_context->opaque = this;// Why?
 #endif
@@ -121,12 +126,6 @@ public:
       _frame_rate.den = 1;
     }
 #endif
-
-    _av_frame = av_frame_alloc();
-    if (_av_frame == nullptr) {
-      log_utils_internal::LogAvError("Cannot allocate frame", AVERROR(ENOMEM));
-      exit_failure();
-    }
   }
 
   ~Stream() { _Free(); }
@@ -157,17 +156,6 @@ public:
     return _av_stream->index;
   }
 
-  [[nodiscard]] auto Width() const noexcept -> int
-  {
-    assert(_av_stream->codecpar->width > 0);// NOLINT
-    return _av_stream->codecpar->width;
-  }
-
-  [[nodiscard]] auto Height() const noexcept -> int
-  {
-    assert(_av_stream->codecpar->height > 0);// NOLINT
-    return _av_stream->codecpar->height;
-  }
 
   [[nodiscard]] auto FrameRate() const noexcept -> AVRational { return _frame_rate; }
 
@@ -183,6 +171,8 @@ public:
     const int64_t den = static_cast<int64_t>(_frame_rate.num) * _av_stream->time_base.num;
     return _start_time + (den > 0 ? (num / den) : num);
   }
+
+  void Flush() noexcept { avcodec_flush_buffers(_av_codec_context); }
 
   [[nodiscard]] auto ReceiveFrames(AVPacket *av_packet,
     const std::function<bool(AVFrame *)> &frame_func) noexcept -> bool
@@ -267,7 +257,6 @@ private:
 
   AVFormatContext *_av_format_ctx = nullptr;
   AVPacket *_av_packet = nullptr;
-  AVFrame *_av_frame = nullptr;
 
   int _best_video_stream = -1;
 
@@ -293,12 +282,6 @@ DecoderImpl::DecoderImpl(std::string path) : _path{ std::move(path) }
   _av_packet = av_packet_alloc();
   if (_av_packet == nullptr) {
     log_utils_internal::LogAvError("Cannot allocate packet", AVERROR(ENOMEM));
-    exit_failure();
-  }
-
-  _av_frame = av_frame_alloc();
-  if (_av_frame == nullptr) {
-    log_utils_internal::LogAvError("Cannot allocate frame", AVERROR(ENOMEM));
     exit_failure();
   }
 
@@ -364,8 +347,8 @@ auto DecoderImpl::StreamInfo() const noexcept -> std::vector<DecodeVideoStreamIn
     DecodeVideoStreamInfo dvsi{};
     dvsi.stream_index = fs.stream->Index();
     dvsi.is_best = (dvsi.stream_index == _best_video_stream);
-    dvsi.width = fs.stream->Width();
-    dvsi.height = fs.stream->Height();
+    dvsi.width = fs.stream->CodecContext()->width;
+    dvsi.height = fs.stream->CodecContext()->height;
     dvsi.frame_rate = { /*.num=*/fs.stream->FrameRate().num, /*.den=*/fs.stream->FrameRate().den };
     dvsi.first_frame_nb = 1;// Good??
     dvsi.frame_count = fs.stream->FrameCount();
@@ -423,7 +406,6 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
   assert(stream != nullptr);// NOLINT
   assert(filter_graph != nullptr);// NOLINT
 
-
   const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
   constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
@@ -433,13 +415,12 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
     return false;
   }
 
-  avcodec_flush_buffers(stream->CodecContext());
-
+  stream->Flush();
 
   bool got_frame = false;// TODO??!?!?
   bool keep_going = true;
   int ret = 0;
-  while (ret >= 0 && keep_going /*!got_frame*/) {
+  while (ret >= 0 && keep_going) {
     // Read a packet, which for video streams corresponds to one frame.
     ret = av_read_frame(_av_format_ctx, _av_packet);
 
@@ -454,10 +435,18 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
 
     keep_going =
       stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *frame) {
+        // TODO(tohi): Can we seek based on frame PTS? Check frame PTS before sending to filter
+        // graph?
+
         return filter_graph->FilterFrames(frame, [&](AVFrame *filt_frame) {
           // Check if the frame has a PTS/duration that matches our seek target.
+          bool keep_going_filt = true;
           if (filt_frame->pts <= timestamp
               && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
+            // Found a frame with a good PTS so we do not need to look for more frames.
+            // This is our one chance.
+            keep_going_filt = false;
+
             dvf.width = filt_frame->width;
             dvf.height = filt_frame->height;
             dvf.key_frame = filt_frame->key_frame > 0;
@@ -480,7 +469,7 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
               break;
             default:
               LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-              return false;// keep_going
+              return keep_going_filt;
             }
 
             constexpr std::array<Channel, 4> kChannels = {
@@ -504,175 +493,22 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
               std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
             }
             got_frame = true;
-            return false;// keep_going
+            return keep_going_filt;
           }
-          return true;// keep_going
+          return keep_going_filt;
         });
       });
   }
 
   return got_frame;
 
-#if 0
-    if (ret < 0) {
-      // Failed to read frame/packet - send flush packet to decoder.
-      ret = avcodec_send_packet(stream->CodecContext(), /*avpkt=*/nullptr);
-    } else {
-      assert(_av_packet->pts != AV_NOPTS_VALUE);// NOLINT
-      // if (_av_packet->pts == AV_NOPTS_VALUE) {
-      //   ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Missing packet PTS (B-frame?)\n");
-      //   return false;
-      // }
-      ret = avcodec_send_packet(stream->CodecContext(), _av_packet);
-    }
+  // _av_frame->decode_error_flags
 
-    // Packet has been sent to the decoder.
-    av_packet_unref(_av_packet);
-    if (ret < 0) {
-      log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
-      return false;
-    }
-
-    while (ret >= 0) {
-      ret = avcodec_receive_frame(stream->CodecContext(), _av_frame);
-      if (ret == AVERROR_EOF) {// NOLINT
-        goto end;// should this be an error if we haven't found our seek frame yet!?
-      } else if (ret == AVERROR(EAGAIN)) {
-        // Break to packet read (outer) loop, send more packets to the decoder.
-        ret = 0;
-        break;
-      } else if (ret < 0) {
-        // Legitimate decoding errors.
-        log_utils_internal::LogAvError("Cannot decode frame", ret);
-        // frame unref?
-        return false;
-      }
-      assert(ret >= 0);// NOLINT
-
-      _av_frame->pts = _av_frame->best_effort_timestamp;
-
-      if (filter_graph != nullptr) {
-        if (!filter_graph->FilterFrame(_av_frame, [&](AVFrame *filt_frame) {
-              // Check if the frame has a PTS/duration that matches our seek target.
-              if (filt_frame->pts <= timestamp
-                  && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
-                dvf.width = filt_frame->width;
-                dvf.height = filt_frame->height;
-                dvf.key_frame = filt_frame->key_frame > 0;
-                dvf.frame_nb = frame_nb;
-                dvf.pixel_aspect_ratio = (filt_frame->sample_aspect_ratio.num == 0
-                                           && filt_frame->sample_aspect_ratio.den == 1)
-                                           ? 1.0
-                                           : av_q2d(filt_frame->sample_aspect_ratio);
-
-                dvf.pix_fmt = PixelFormat::kNone;
-                switch (filt_frame->format) {
-                case AV_PIX_FMT_GRAYF32:
-                  dvf.pix_fmt = PixelFormat::kGray;
-                  break;
-                case AV_PIX_FMT_GBRPF32:
-                  dvf.pix_fmt = PixelFormat::kRGB;
-                  break;
-                case AV_PIX_FMT_GBRAPF32:
-                  dvf.pix_fmt = PixelFormat::kRGBA;
-                  break;
-                default:
-                  LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-                  return false;
-                }
-                constexpr std::array<Channel, 4> kChannels = {
-                  Channel::kGreen,
-                  Channel::kBlue,
-                  Channel::kRed,
-                  Channel::kAlpha,
-                };
-
-                const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
-                assert(0U < channel_count && channel_count < 4U);// NOLINT
-                assert(dvf.width > 0 && dvf.height > 0);// NOLINT
-
-                dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
-                dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
-                for (std::size_t i = 0U; i < channel_count; ++i) {
-                  const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
-                  auto pix = ChannelData(&dvf, ch);// NOLINT
-                  assert(!Empty(pix));// NOLINT
-                  assert(filt_frame->data[i] != nullptr);// NOLINT
-                  std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
-                }
-                got_frame = true;
-              }
-              return true;
-            })) {
-          return false;
-        }
-      } else {
-      }
-#endif
-// _av_frame->decode_error_flags
-
-// _av_frame->crop_top
-// _av_frame->crop_bottom
-// _av_frame->crop_left
-// _av_frame->crop_right
-// av_frame_apply_cropping(...)
-#if 0
-      // Check if the decoded frame has a PTS/duration that matches our seek target. If so, we will
-      // push the frame through the filter graph.
-      _av_frame->pts = _av_frame->best_effort_timestamp;
-      if (_av_frame->pts <= timestamp && timestamp < (_av_frame->pts + _av_frame->pkt_duration)) {
-        // TODO: push through filter graph!
-        got_frame = true;
-
-        dvf.width = _av_frame->width;
-        dvf.height = _av_frame->height;
-        dvf.key_frame = _av_frame->key_frame > 0;
-        dvf.frame_nb = frame_nb;
-        dvf.pixel_aspect_ratio =
-          (_av_frame->sample_aspect_ratio.num == 0 && _av_frame->sample_aspect_ratio.den == 1)
-            ? 1.0
-            : av_q2d(_av_frame->sample_aspect_ratio);
-
-        dvf.pix_fmt = PixelFormat::kNone;
-        switch (_av_frame->format) {
-        case AV_PIX_FMT_GRAYF32:
-          dvf.pix_fmt = PixelFormat::kGray;
-          break;
-        case AV_PIX_FMT_GBRPF32:
-          dvf.pix_fmt = PixelFormat::kRGB;
-          break;
-        case AV_PIX_FMT_GBRAPF32:
-          dvf.pix_fmt = PixelFormat::kRGBA;
-          break;
-        default:
-          LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-          return false;
-        }
-        constexpr std::array<Channel, 4> kChannels = {
-          Channel::kGreen,
-          Channel::kBlue,
-          Channel::kRed,
-          Channel::kAlpha,
-        };
-
-        const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
-        assert(0U < channel_count && channel_count < 4U);// NOLINT
-        assert(dvf.width > 0 && dvf.height > 0);// NOLINT
-
-        dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
-        dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
-        for (std::size_t i = 0U; i < channel_count; ++i) {
-          const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
-          auto pix = ChannelData(&dvf, ch);// NOLINT
-          assert(!Empty(pix));// NOLINT
-          assert(_av_frame->data[i] != nullptr);// NOLINT
-          std::memcpy(pix.data, _av_frame->data[i], pix.count * sizeof(float));// NOLINT
-        }
-
-      } else {
-        // cache the frame?
-      }
-#endif
+  // _av_frame->crop_top
+  // _av_frame->crop_bottom
+  // _av_frame->crop_left
+  // _av_frame->crop_right
+  // av_frame_apply_cropping(...)
 }
 
 void DecoderImpl::_Free() noexcept
@@ -680,19 +516,9 @@ void DecoderImpl::_Free() noexcept
   if (_av_packet != nullptr) {
     av_packet_unref(_av_packet);
     av_packet_free(&_av_packet);
-    assert(_av_packet == nullptr);// NOLINT
   }
 
-  if (_av_frame != nullptr) {
-    av_frame_unref(_av_frame);
-    av_frame_free(&_av_frame);
-    assert(_av_packet == nullptr);// NOLINT
-  }
-
-  if (_av_format_ctx != nullptr) {
-    avformat_close_input(&_av_format_ctx);
-    assert(_av_format_ctx == nullptr);// NOLINT
-  }
+  if (_av_format_ctx != nullptr) { avformat_close_input(&_av_format_ctx); }
 }
 
 // -----------
