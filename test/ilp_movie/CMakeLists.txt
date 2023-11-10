@@ -39,28 +39,6 @@ catch_discover_tests(
   OUTPUT_SUFFIX
   .xml)
 
-add_executable(demux_test demux_test.cpp)
-target_link_libraries(demux_test 
-  PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
-          ilp_gaffer_movie::ilp_gaffer_movie_options
-          ilp_movie::ilp_movie
-          Catch2::Catch2WithMain)
-
-# Automatically discover tests that are defined in catch based test files you can modify the unittests. Set TEST_PREFIX
-# to whatever you want, or use different for different binaries.
-catch_discover_tests(
-  demux_test 
-  TEST_PREFIX
-  "demux_test."
-  REPORTER
-  XML
-  OUTPUT_DIR
-  .
-  OUTPUT_PREFIX
-  "demux_test."
-  OUTPUT_SUFFIX
-  .xml)
-
 add_executable(decoder_test decoder_test.cpp)
 target_link_libraries(decoder_test 
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings

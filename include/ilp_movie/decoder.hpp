@@ -42,7 +42,10 @@ struct DecodedVideoFrame
   int height = -1;
   int64_t frame_nb = -1;
   bool key_frame = false;
-  double pixel_aspect_ratio = -1.0;
+  struct {
+    int num = 0;
+    int den = 1;
+  } pixel_aspect_ratio = {};
 
   PixelFormat pix_fmt = PixelFormat::kNone;
 

@@ -180,9 +180,7 @@ public:
     int ret = avcodec_send_packet(_av_codec_context, av_packet);
 
     // Packet has been sent to the decoder. Check if it is a "flush packet".
-    if (av_packet != nullptr) {
-      av_packet_unref(av_packet);
-    }
+    if (av_packet != nullptr) { av_packet_unref(av_packet); }
 
     if (ret < 0) {
       log_utils_internal::LogAvError("Cannot send packet to decoder", ret);
@@ -436,69 +434,69 @@ auto DecoderImpl::DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoF
     // TODO(tohi): Can we seek based on packet PTS?
 
     keep_going =
-      stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *frame) {
+      stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *dec_frame) {
         // TODO(tohi): Can we seek based on frame PTS? Check frame PTS before sending to filter
         // graph?
+        bool keep_going_dec = true;
+        if (dec_frame->pts <= timestamp && timestamp < (dec_frame->pts + dec_frame->pkt_duration)) {
+          return filter_graph->FilterFrames(dec_frame, [&](AVFrame *filt_frame) {
+            // Check if the frame has a PTS/duration that matches our seek target.
+            bool keep_going_filt = true;
+            if (filt_frame->pts <= timestamp
+                && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
+              // Found a frame with a good PTS so we do not need to look for more frames.
+              // This is our one chance.
+              keep_going_filt = false;
 
-        return filter_graph->FilterFrames(frame, [&](AVFrame *filt_frame) {
-          // Check if the frame has a PTS/duration that matches our seek target.
-          bool keep_going_filt = true;
-          if (filt_frame->pts <= timestamp
-              && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
-            // Found a frame with a good PTS so we do not need to look for more frames.
-            // This is our one chance.
-            keep_going_filt = false;
+              dvf.pix_fmt = PixelFormat::kNone;
+              switch (filt_frame->format) {
+              case AV_PIX_FMT_GRAYF32:
+                dvf.pix_fmt = PixelFormat::kGray;
+                break;
+              case AV_PIX_FMT_GBRPF32:
+                dvf.pix_fmt = PixelFormat::kRGB;
+                break;
+              case AV_PIX_FMT_GBRAPF32:
+                dvf.pix_fmt = PixelFormat::kRGBA;
+                break;
+              default:
+                LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+                return keep_going_filt;
+              }
 
-            dvf.width = filt_frame->width;
-            dvf.height = filt_frame->height;
-            dvf.key_frame = filt_frame->key_frame > 0;
-            dvf.frame_nb = frame_nb;
-            dvf.pixel_aspect_ratio =
-              (filt_frame->sample_aspect_ratio.num == 0 && filt_frame->sample_aspect_ratio.den == 1)
-                ? 1.0
-                : av_q2d(filt_frame->sample_aspect_ratio);
+              dvf.width = filt_frame->width;
+              dvf.height = filt_frame->height;
+              dvf.key_frame = filt_frame->key_frame > 0;
+              dvf.frame_nb = frame_nb;
+              dvf.pixel_aspect_ratio = { /*.num=*/filt_frame->sample_aspect_ratio.num, /*.den=*/filt_frame->sample_aspect_ratio.den};
 
-            dvf.pix_fmt = PixelFormat::kNone;
-            switch (filt_frame->format) {
-            case AV_PIX_FMT_GRAYF32:
-              dvf.pix_fmt = PixelFormat::kGray;
-              break;
-            case AV_PIX_FMT_GBRPF32:
-              dvf.pix_fmt = PixelFormat::kRGB;
-              break;
-            case AV_PIX_FMT_GBRAPF32:
-              dvf.pix_fmt = PixelFormat::kRGBA;
-              break;
-            default:
-              LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+              constexpr std::array<Channel, 4> kChannels = {
+                Channel::kGreen,
+                Channel::kBlue,
+                Channel::kRed,
+                Channel::kAlpha,
+              };
+
+              const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
+              assert(0U < channel_count && channel_count < 4U);// NOLINT
+              assert(dvf.width > 0 && dvf.height > 0);// NOLINT
+
+              dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
+              dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
+              for (std::size_t i = 0U; i < channel_count; ++i) {
+                const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
+                auto pix = ChannelData(&dvf, ch);// NOLINT
+                assert(!Empty(pix));// NOLINT
+                assert(filt_frame->data[i] != nullptr);// NOLINT
+                std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+              }
+              got_frame = true;
               return keep_going_filt;
             }
-
-            constexpr std::array<Channel, 4> kChannels = {
-              Channel::kGreen,
-              Channel::kBlue,
-              Channel::kRed,
-              Channel::kAlpha,
-            };
-
-            const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
-            assert(0U < channel_count && channel_count < 4U);// NOLINT
-            assert(dvf.width > 0 && dvf.height > 0);// NOLINT
-
-            dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
-            dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
-            for (std::size_t i = 0U; i < channel_count; ++i) {
-              const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
-              auto pix = ChannelData(&dvf, ch);// NOLINT
-              assert(!Empty(pix));// NOLINT
-              assert(filt_frame->data[i] != nullptr);// NOLINT
-              std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
-            }
-            got_frame = true;
             return keep_going_filt;
-          }
-          return keep_going_filt;
-        });
+          });
+        }
+        return keep_going_dec;
       });
   }
 

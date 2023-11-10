@@ -35,7 +35,7 @@ struct FramePair
   fp->dec_frame.width = w;
   fp->dec_frame.height = h;
   fp->dec_frame.frame_nb = frame_nb;
-  fp->dec_frame.pixel_aspect_ratio = 1.0;
+  fp->dec_frame.pixel_aspect_ratio = { /*.num=*/1, /*.den=*/1 };
   fp->dec_frame.pix_fmt = pix_fmt;
   fp->dec_frame.buf.count = ilp_movie::ChannelCount(pix_fmt)
                             * static_cast<std::size_t>(fp->dec_frame.width)
