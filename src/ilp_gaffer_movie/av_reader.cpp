@@ -18,7 +18,7 @@
 
 #include <boost/bind/bind.hpp>
 
-#include <ilp_movie/demux.hpp>
+#include <ilp_movie/decoder.hpp>
 #include <ilp_movie/log.hpp>
 #include <ilp_movie/pixel_data.hpp>
 
@@ -28,10 +28,11 @@ static const IECore::InternedString kTileBatchIndexContextName("__tileBatchIndex
 
 namespace {
 
+#if 0
 class Frame
 {
 public:
-  explicit Frame(std::unique_ptr<ilp_movie::DemuxFrame> frame) : _frame(std::move(frame)) {}
+  explicit Frame(std::unique_ptr<ilp_movie::DecodedVideoFrame> frame) : _frame(std::move(frame)) {}
 
 #if 0
   // Read a chunk of data from the file, formatted as a tile batch that will be stored on the tile
@@ -47,14 +48,15 @@ public:
 
 private:
 #endif
-  std::unique_ptr<ilp_movie::DemuxFrame> _frame;
+  std::unique_ptr<ilp_movie::DecodedVideoFrame> _frame;
 };
+#endif
 
 // For success, frame should be set, and error left null.
 // For failure, frame should be left null, and error should be set.
 struct CacheEntry
 {
-  std::shared_ptr<Frame> frame;
+  std::shared_ptr<ilp_movie::DecodedVideoFrame> frame;
   std::shared_ptr<std::string> error;
 };
 
@@ -72,7 +74,7 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "FrameCacheGetter");
 
-  cost = 1;
+  cost = 1U;
 
   CacheEntry result = {};
 
@@ -104,29 +106,23 @@ CacheEntry FrameCacheGetter(const std::pair<std::string, int> &key,
     IECore::msg(iec_level, "MovieReader", str);
   });
 
-  ilp_movie::DemuxParams demux_params = {};
-  demux_params.filename = key.first;
-  auto demux_ctx = ilp_movie::DemuxMakeContext(demux_params);
-  if (demux_ctx == nullptr) {
-    result.error.reset(new std::string("AvReader : Cannot initialize demuxer"));// NOLINT
+  try {
+    ilp_movie::Decoder decoder{};
+    if (!decoder.Open(key.first)) {
+      result.error.reset(new std::string("AvReader : Cannot open decoder"));// NOLINT
+      return result;
+    }
+
+    auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
+    if (!decoder.DecodeVideoFrame(0, key.second, /*out*/ *dvf)) {
+      result.error.reset(new std::string("AvReader : Cannot seek to frame"));// NOLINT
+      return result;
+    }
+    result.frame.reset(dvf.release());// NOLINT
+  } catch (std::exception &) {
+    result.error.reset(new std::string("AvReader : Cannot initialize decoder"));// NOLINT
     return result;
   }
-
-  ilp_movie::DemuxFrame demux_frame = {};
-  if (!ilp_movie::DemuxSeek(*demux_ctx, key.second, &demux_frame)) {
-    result.error.reset(new std::string("AvReader : Cannot seek to frame"));// NOLINT
-    return result;
-  }
-
-  auto demux_frame_ptr = std::make_unique<ilp_movie::DemuxFrame>();
-  demux_frame_ptr->width = demux_frame.width;
-  demux_frame_ptr->height = demux_frame.height;
-  demux_frame_ptr->frame_nb = demux_frame.frame_nb;
-  demux_frame_ptr->pixel_aspect_ratio = demux_frame.pixel_aspect_ratio;
-  demux_frame_ptr->pix_fmt = demux_frame.pix_fmt;
-  demux_frame_ptr->buf = std::move(demux_frame.buf);
-
-  result.frame.reset(new Frame(std::move(demux_frame_ptr)));// NOLINT
   return result;
 
 #if 0
@@ -429,14 +425,19 @@ void AvReader::hashFormat(const GafferImage::ImagePlug *parent,
 GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
   if (frame == nullptr) { return GafferImage::FormatPlug::getDefaultFormat(context); }
+
+  const double pixel_aspect =
+    (frame->pixel_aspect_ratio.num > 0 && frame->pixel_aspect_ratio.den > 0)
+      ? static_cast<double>(frame->pixel_aspect_ratio.num) / frame->pixel_aspect_ratio.den
+      : 1.0;
 
   return GafferImage::Format(
     /*displayWindow=*/Imath::Box2i(
       /*minT=*/Imath::V2i(0, 0),
-      /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height)),
-    /*pixelAspect=*/frame->_frame->pixel_aspect_ratio,
+      /*maxT=*/Imath::V2i(frame->width, frame->height)),
+    /*pixelAspect=*/pixel_aspect,
     /*fromEXRSpace=*/false);
 }
 
@@ -458,10 +459,10 @@ Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context *context,
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeDataWindow");
 
-  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->dataWindowPlug()->defaultValue(); }
   return Imath::Box2i(
-    /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height));
+    /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->width, frame->height));
 #if 0
   const auto data_window = Imath::Box2i(
     /*minT=*/Imath::V2i(0, 0), /*maxT=*/Imath::V2i(frame->_frame->width, frame->_frame->height));
@@ -568,12 +569,12 @@ IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Con
 {
   IECore::msg(IECore::Msg::Info, "AvReader", "computeChannelNames");
 
-  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelNamesPlug()->defaultValue(); }
 
   // clang-format off
   IECore::StringVectorDataPtr channelNamesData = nullptr;
-  switch (frame->_frame->pix_fmt) {
+  switch (frame->pix_fmt) {
   case ilp_movie::PixelFormat::kGray:
   case ilp_movie::PixelFormat::kRGB:
     channelNamesData = new IECore::StringVectorData({// NOLINT
@@ -628,7 +629,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
       % tileOrigin.x % tileOrigin.y);
 
   GafferImage::ImagePlug::GlobalScope c(context);
-  std::shared_ptr<Frame> frame = std::static_pointer_cast<Frame>(_retrieveFrame(context));
+  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
 
   if (frame == nullptr) { return parent->channelDataPlug()->defaultValue(); }
   IECore::msg(
@@ -653,9 +654,9 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
     std::vector<float>(static_cast<size_t>(GafferImage::ImagePlug::tilePixels())));
   auto &tile = tileData->writable();
 
-  const auto *f = frame->_frame.get();
+  const auto *f = frame.get();
   ilp_movie::PixelData<float> ch = {};
-  switch (frame->_frame->pix_fmt) {
+  switch (frame->pix_fmt) {
   case ilp_movie::PixelFormat::kGray:
     ch = ilp_movie::ChannelData(
       f->width, f->height, ilp_movie::Channel::kRed, f->buf.data.get(), f->buf.count);

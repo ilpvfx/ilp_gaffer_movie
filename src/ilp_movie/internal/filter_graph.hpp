@@ -18,10 +18,9 @@ struct AVFrame;
 
 namespace filter_graph_internal {
 
-struct FilterGraphArgs
+struct FilterGraphDescription
 {
-  // const AVCodecContext *codec_ctx = nullptr;
-  std::string filter_descr = "null";// Pass-through
+  std::string filter_descr = "null";// Pass-through (for video), use "anull" for audio.
   std::string sws_flags = "";
 
   struct
@@ -46,7 +45,7 @@ class FilterGraphImpl;
 class ILP_MOVIE_NO_EXPORT FilterGraph
 {
 public:
-  explicit FilterGraph(const FilterGraphArgs &args);
+  FilterGraph();
   ~FilterGraph();
 
   // Movable.
@@ -57,6 +56,8 @@ public:
   FilterGraph(const FilterGraph &rhs) = delete;
   FilterGraph &operator=(const FilterGraph &rhs) = delete;
 
+  [[nodiscard]] auto SetDescription(const FilterGraphDescription &descr) noexcept -> bool;
+
   [[nodiscard]] auto FilterFrames(AVFrame *in_frame,
     const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool;
 
@@ -66,12 +67,5 @@ private:
 
   std::unique_ptr<FilterGraphImpl> _pimpl;
 };
-
-#if 0
-[[nodiscard]] ILP_MOVIE_NO_EXPORT auto ConfigureVideoFilters(const FilterGraphArgs &args,
-  AVFilterGraph **graph,
-  AVFilterContext **buffersrc_ctx,
-  AVFilterContext **buffersink_ctx) noexcept -> bool;
-#endif
 
 }// namespace filter_graph_internal

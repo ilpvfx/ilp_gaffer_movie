@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>// std::size_t
+#include <cstdint>// int64_t, etc.
 #include <memory>// std::unique_ptr
 #include <string>// std::string
 #include <vector>// std::vector
@@ -42,7 +43,8 @@ struct DecodedVideoFrame
   int height = -1;
   int64_t frame_nb = -1;
   bool key_frame = false;
-  struct {
+  struct
+  {
     int num = 0;
     int den = 1;
   } pixel_aspect_ratio = {};
@@ -62,7 +64,7 @@ class DecoderImpl;
 class ILP_MOVIE_EXPORT Decoder
 {
 public:
-  explicit Decoder(std::string path);
+  Decoder();
   ~Decoder();
 
   // Movable.
@@ -73,10 +75,16 @@ public:
   Decoder(const Decoder &rhs) = delete;
   Decoder &operator=(const Decoder &rhs) = delete;
 
-  [[nodiscard]] auto StreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>;
-  
-  [[nodiscard]] auto SetStreamFilterGraph(int stream_index,
-    std::string filter_descr = "null") noexcept -> bool;
+  [[nodiscard]] auto Open(std::string url) noexcept -> bool;
+  [[nodiscard]] auto IsOpen() const noexcept -> bool;
+
+  void Close() noexcept;
+
+  [[nodiscard]] auto VideoStreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>;
+
+  [[nodiscard]] auto SetFilterGraph(int stream_index,
+    std::string filter_descr = "null",
+    std::string sws_flags = "") noexcept -> bool;
 
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool;

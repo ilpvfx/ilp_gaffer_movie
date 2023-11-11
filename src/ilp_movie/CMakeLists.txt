@@ -2,7 +2,6 @@ include(GenerateExportHeader)
 
 add_library(ilp_movie SHARED
   "decoder.cpp"
-  "demux.cpp"
   "log.cpp"
   "mux.cpp"
   "pixel_data.cpp"

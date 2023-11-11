@@ -553,18 +553,17 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
 
   av_dump_format(impl->ofmt_ctx, /*index=*/0, params.filename.c_str(), /*is_output=*/1);
 
-  filter_graph_internal::FilterGraphArgs fg_args = {};
-  fg_args.filter_descr = params.filter_graph;
-  fg_args.sws_flags = params.sws_flags;
-  fg_args.in.width = impl->enc_ctx->width;
-  fg_args.in.height = impl->enc_ctx->height;
-  fg_args.in.pix_fmt = AV_PIX_FMT_GBRPF32;
-  fg_args.in.sample_aspect_ratio = impl->enc_ctx->sample_aspect_ratio;
-  fg_args.in.time_base = impl->ofmt_ctx->streams[0]->time_base;// NOLINT
-  fg_args.out.pix_fmt = impl->enc_ctx->pix_fmt;
-  try {
-    impl->filter_graph = std::make_unique<filter_graph_internal::FilterGraph>(fg_args);
-  } catch (std::exception&) {
+  filter_graph_internal::FilterGraphDescription fg_descr = {};
+  fg_descr.filter_descr = params.filter_graph;
+  fg_descr.sws_flags = params.sws_flags;
+  fg_descr.in.width = impl->enc_ctx->width;
+  fg_descr.in.height = impl->enc_ctx->height;
+  fg_descr.in.pix_fmt = AV_PIX_FMT_GBRPF32;
+  fg_descr.in.sample_aspect_ratio = impl->enc_ctx->sample_aspect_ratio;
+  fg_descr.in.time_base = impl->ofmt_ctx->streams[0]->time_base;// NOLINT
+  fg_descr.out.pix_fmt = impl->enc_ctx->pix_fmt;
+  impl->filter_graph = std::make_unique<filter_graph_internal::FilterGraph>();
+  if (!impl->filter_graph->SetDescription(fg_descr)) { 
     return nullptr;
   }
 

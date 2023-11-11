@@ -108,7 +108,7 @@ if(Gaffer_FIND_COMPONENTS)
 else()
   # Try to find all components.
   set(GAFFER_COMPONENTS_PROVIDED FALSE)
-  set(Gaffer_FIND_COMPONENTS ${_ILMBASE_COMPONENT_LIST})
+  set(Gaffer_FIND_COMPONENTS ${_GAFFER_COMPONENT_LIST})
 endif()
 
 # Append GAFFER_ROOT or $ENV{GAFFER_ROOT} if set (prioritize the direct cmake var).
@@ -201,6 +201,13 @@ foreach(COMPONENT ${Gaffer_FIND_COMPONENTS})
     set(Gaffer_${COMPONENT}_FOUND FALSE)
   endif()
 endforeach()
+
+# HACK(tohi):
+# When updating from Gaffer-1.2.0.2 to Gaffer-1.3.1.0 we need to add this extra 
+# include directory because of a "bad/sloppy" #include <half.h> in a header file.
+# Supposedly this has been introduced after moving to the Imath that is no longer 
+# part of OpenEXR.
+list(APPEND _GAFFER_INCLUDE_DIRS ${Gaffer_INCLUDE_DIR}/Imath)
 
 # ------------------------------------------------------------------------
 #  Cache and set Gaffer_FOUND

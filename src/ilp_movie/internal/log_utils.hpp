@@ -16,7 +16,7 @@ namespace log_utils_internal {
 //     return false;
 //   }
 //
-// Typically, the message string will not end with a newline character since
+// Typically, the message string should not end with a newline character since
 // one is automatically added to the final message that is built internally.
 ILP_MOVIE_NO_EXPORT
 void LogAvError(const char *msg, int errnum = 0, int log_level = ilp_movie::LogLevel::kError) noexcept;
