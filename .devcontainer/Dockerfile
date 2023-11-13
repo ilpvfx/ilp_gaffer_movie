@@ -18,7 +18,7 @@ RUN git clone --depth 1 --branch ffmpeg-5.1 https://github.com/piratecrew/rez-ff
     mkdir /tmp/rez-ffmpeg/build && cd /tmp/rez-ffmpeg/build && \
     cmake .. -DCMAKE_INSTALL_PREFIX=/opt/ffmpeg-5.1 && make -j11
 
-RUN cd /tmp && wget https://github.com/GafferHQ/gaffer/releases/download/1.2.0.2/gaffer-1.2.0.2-linux.tar.gz && \
-    mkdir -p /opt/gaffer-1.2.0.2 && tar -xf gaffer-1.2.0.2-linux.tar.gz -C /opt/gaffer-1.2.0.2 --strip-components=1
+RUN cd /tmp && wget https://github.com/GafferHQ/gaffer/releases/download/1.3.1.0/gaffer-1.3.1.0-linux.tar.gz && \
+    mkdir -p /opt/gaffer-1.3.1.0 && tar -xf gaffer-1.3.1.0-linux.tar.gz -C /opt/gaffer-1.3.1.0 --strip-components=1
 
 RUN mkdir /tmp/test_data
