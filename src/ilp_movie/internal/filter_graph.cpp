@@ -64,24 +64,21 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    // AVFilterContext *filt_src = nullptr;
-    // AVFilterContext *filt_out = nullptr;
-
     if (!(descr.in.width > 0 && descr.in.height > 0
           && descr.in.pix_fmt != AV_PIX_FMT_NONE
           //&& descr.in.sample_aspect_ratio.num > 0 && descr.in.sample_aspect_ratio.den > 0
           && descr.in.time_base.num > 0 && descr.in.time_base.den > 0
           && descr.out.pix_fmt != AV_PIX_FMT_NONE)) {
-      log_utils_internal::LogAvError(
-        "Bad filter graph in/out parameter(s)", AVERROR(EINVAL));// NOLINT
+      ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Bad filter graph description\n");            
       return exit_func(/*success=*/false);
     }
 
     // Buffer video source: the decoded frames from the decoder will be inserted here.
     // clang-format off
-    std::array<char, 512> buffersrc_args = {};
+    constexpr size_t kBufSize = 512;
+    std::array<char, kBufSize> buffersrc_args = {};
     // NOLINTNEXTLINE
-    if (const int n = std::snprintf(buffersrc_args.data(), 512 * sizeof(char),
+    if (const int length_needed = std::snprintf(buffersrc_args.data(), kBufSize * sizeof(char),
 #if 1
           "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
           descr.in.width, descr.in.height, descr.in.pix_fmt,
@@ -94,7 +91,7 @@ public:
           descr.codec_ctx->sample_aspect_ratio.num, FFMAX(descr.codec_ctx->sample_aspect_ratio.den, 1),
           enc_ctx->framerate.num, enc_ctx->framerate.den                
 #endif                
-          ); !(0 < n && n < 512)) {
+          ); (length_needed < 0 || length_needed >= static_cast<int>(kBufSize))) {
       ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot create buffer source args\n");
       return exit_func(/*success=*/false);
     }
@@ -190,7 +187,11 @@ public:
   [[nodiscard]] auto FilterFrames(AVFrame *in_frame,
     const std::function<bool(AVFrame *)> &filter_func) const noexcept -> bool
   {
-    if (_graph == nullptr) { return false; }
+    if (_graph == nullptr) {
+      ilp_movie::LogMsg(ilp_movie::LogLevel::kWarning,
+        "Cannot filter frames - no description set for filter graph\n");
+      return false;
+    }
 
     // Push the decoded frame into the filter graph.
     int ret = av_buffersrc_add_frame_flags(_buffersrc_ctx, in_frame, AV_BUFFERSRC_FLAG_KEEP_REF);
@@ -237,9 +238,9 @@ private:
     }
   }
 
-  AVFilterGraph *_graph = nullptr;
   AVFilterContext *_buffersrc_ctx = nullptr;
   AVFilterContext *_buffersink_ctx = nullptr;
+  AVFilterGraph *_graph = nullptr;
   AVFrame *_filt_frame = nullptr;
 };
 
