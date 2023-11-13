@@ -4,16 +4,18 @@ include(CMakeDependentOption)
 include(CheckCXXCompilerFlag)
 
 
-macro(ilp_gaffer_movie_supports_sanitizers)
-  if((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang.*" OR CMAKE_CXX_COMPILER_ID MATCHES ".*GNU.*"))
-    # NOTE(tohi): Disabling because cannot find libasan/libubsan
-    #
-    set(SUPPORTS_UBSAN OFF)
-    # set(SUPPORTS_UBSAN ON)
-  else()
-    set(SUPPORTS_UBSAN OFF)
-  endif()
-endmacro()
+# NOTE(tohi): Skip sanitizers for now...
+#
+# macro(ilp_gaffer_movie_supports_sanitizers)
+#   if((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang.*" OR CMAKE_CXX_COMPILER_ID MATCHES ".*GNU.*"))
+#     # NOTE(tohi): Disabling because cannot find libasan/libubsan
+#     #
+#     set(SUPPORTS_UBSAN OFF)
+#     # set(SUPPORTS_UBSAN ON)
+#   else()
+#     set(SUPPORTS_UBSAN OFF)
+#   endif()
+# endmacro()
 
 macro(ilp_gaffer_movie_setup_options)
   option(ilp_gaffer_movie_ENABLE_COVERAGE "Enable coverage reporting" OFF)
@@ -35,49 +37,50 @@ macro(ilp_gaffer_movie_setup_options)
   if(NOT PROJECT_IS_TOP_LEVEL OR ilp_gaffer_movie_PACKAGING_MAINTAINER_MODE)
     option(ilp_gaffer_movie_ENABLE_IPO "Enable IPO/LTO" OFF)
     option(ilp_gaffer_movie_WARNINGS_AS_ERRORS "Treat Warnings As Errors" OFF)
-    option(ilp_gaffer_movie_ENABLE_USER_LINKER "Enable user-selected linker" OFF)
+    #option(ilp_gaffer_movie_ENABLE_USER_LINKER "Enable user-selected linker" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_ADDRESS "Enable address sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_LEAK "Enable leak sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_UNDEFINED "Enable undefined sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_THREAD "Enable thread sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_MEMORY "Enable memory sanitizer" OFF)
-    option(ilp_gaffer_movie_ENABLE_UNITY_BUILD "Enable unity builds" OFF)
+    #option(ilp_gaffer_movie_ENABLE_UNITY_BUILD "Enable unity builds" OFF)
     option(ilp_gaffer_movie_ENABLE_CLANG_TIDY "Enable clang-tidy" OFF)
-    option(ilp_gaffer_movie_ENABLE_CPPCHECK "Enable cpp-check analysis" OFF)
+    #option(ilp_gaffer_movie_ENABLE_CPPCHECK "Enable cpp-check analysis" OFF)
     option(ilp_gaffer_movie_ENABLE_PCH "Enable precompiled headers" OFF)
-    option(ilp_gaffer_movie_ENABLE_CACHE "Enable ccache" OFF)
+    #option(ilp_gaffer_movie_ENABLE_CACHE "Enable ccache" OFF)
   else()
     option(ilp_gaffer_movie_ENABLE_IPO "Enable IPO/LTO" ON)
     option(ilp_gaffer_movie_WARNINGS_AS_ERRORS "Treat Warnings As Errors" ON)
-    option(ilp_gaffer_movie_ENABLE_USER_LINKER "Enable user-selected linker" OFF)
+    #option(ilp_gaffer_movie_ENABLE_USER_LINKER "Enable user-selected linker" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_ADDRESS "Enable address sanitizer" ${SUPPORTS_ASAN})
     option(ilp_gaffer_movie_ENABLE_SANITIZER_LEAK "Enable leak sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_UNDEFINED "Enable undefined sanitizer" ${SUPPORTS_UBSAN})
     option(ilp_gaffer_movie_ENABLE_SANITIZER_THREAD "Enable thread sanitizer" OFF)
     option(ilp_gaffer_movie_ENABLE_SANITIZER_MEMORY "Enable memory sanitizer" OFF)
-    option(ilp_gaffer_movie_ENABLE_UNITY_BUILD "Enable unity builds" OFF)
+    #option(ilp_gaffer_movie_ENABLE_UNITY_BUILD "Enable unity builds" OFF)
     option(ilp_gaffer_movie_ENABLE_CLANG_TIDY "Enable clang-tidy" ON)
-    option(ilp_gaffer_movie_ENABLE_CPPCHECK "Enable cpp-check analysis" ON)
+    #option(ilp_gaffer_movie_ENABLE_CPPCHECK "Enable cpp-check analysis" ON)
     option(ilp_gaffer_movie_ENABLE_PCH "Enable precompiled headers" OFF)
-    option(ilp_gaffer_movie_ENABLE_CACHE "Enable ccache" ON)
+    #option(ilp_gaffer_movie_ENABLE_CACHE "Enable ccache" ON)
   endif()
 
   if(NOT PROJECT_IS_TOP_LEVEL)
     mark_as_advanced(
       ilp_gaffer_movie_ENABLE_IPO
       ilp_gaffer_movie_WARNINGS_AS_ERRORS
-      ilp_gaffer_movie_ENABLE_USER_LINKER
+      #ilp_gaffer_movie_ENABLE_USER_LINKER
       ilp_gaffer_movie_ENABLE_SANITIZER_ADDRESS
       ilp_gaffer_movie_ENABLE_SANITIZER_LEAK
       ilp_gaffer_movie_ENABLE_SANITIZER_UNDEFINED
       ilp_gaffer_movie_ENABLE_SANITIZER_THREAD
       ilp_gaffer_movie_ENABLE_SANITIZER_MEMORY
-      ilp_gaffer_movie_ENABLE_UNITY_BUILD
+      #ilp_gaffer_movie_ENABLE_UNITY_BUILD
       ilp_gaffer_movie_ENABLE_CLANG_TIDY
-      ilp_gaffer_movie_ENABLE_CPPCHECK
+      #ilp_gaffer_movie_ENABLE_CPPCHECK
       ilp_gaffer_movie_ENABLE_COVERAGE
       ilp_gaffer_movie_ENABLE_PCH
-      ilp_gaffer_movie_ENABLE_CACHE)
+      #ilp_gaffer_movie_ENABLE_CACHE
+      )
   endif()
 
   # ilp_gaffer_movie_check_libfuzzer_support(LIBFUZZER_SUPPORTED)
@@ -166,20 +169,20 @@ macro(ilp_gaffer_movie_local_options)
       <utility>)
   endif()
 
-  if(ilp_gaffer_movie_ENABLE_CACHE)
-    include(cmake/Cache.cmake)
-    ilp_gaffer_movie_enable_cache()
-  endif()
+  # if(ilp_gaffer_movie_ENABLE_CACHE)
+  #   include(cmake/Cache.cmake)
+  #   ilp_gaffer_movie_enable_cache()
+  # endif()
 
   include(cmake/StaticAnalyzers.cmake)
   if(ilp_gaffer_movie_ENABLE_CLANG_TIDY)
     ilp_gaffer_movie_enable_clang_tidy(ilp_gaffer_movie_options ${ilp_gaffer_movie_WARNINGS_AS_ERRORS})
   endif()
 
-  if(ilp_gaffer_movie_ENABLE_CPPCHECK)
-    ilp_gaffer_movie_enable_cppcheck(${ilp_gaffer_movie_WARNINGS_AS_ERRORS} "" # override cppcheck options
-    )
-  endif()
+  # if(ilp_gaffer_movie_ENABLE_CPPCHECK)
+  #   ilp_gaffer_movie_enable_cppcheck(${ilp_gaffer_movie_WARNINGS_AS_ERRORS} "" # override cppcheck options
+  #   )
+  # endif()
 
   if(ilp_gaffer_movie_ENABLE_COVERAGE)
     include(cmake/Tests.cmake)

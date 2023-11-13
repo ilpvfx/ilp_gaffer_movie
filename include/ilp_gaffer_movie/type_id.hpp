@@ -5,8 +5,9 @@ namespace IlpGafferMovie {
 // clang-format off
 enum class TypeId {
   kFirstTypeId       = 120000,
-  kMovieWriterTypeId = 120001,
-  kMovieReaderTypeId = 120002,
+  kAvReaderTypeId    = 120001,
+  kMovieWriterTypeId = 120002,
+  kMovieReaderTypeId = 120003,
   kLastTypeId        = 120499,
 };
 // clang-format on

@@ -159,31 +159,6 @@ Gaffer.Metadata.registerNode(
 			"layout:section", "Settings.H264",
 			"layout:visibilityActivator", "h264",
 		],
-		"h264.profile" : [
-			"description",
-			"""
-			A fast encoder produces large files and vice versa.
-			The available presets in descending order of speed are:
-			- "baseline" 
-			- "main" 
-			- "high" 
-			- "high10" (first 10 bit compatible profile)
-			- "high422" (supports yuv420p, yuv422p, yuv420p10le and yuv422p10le)
-			- "high444" (supports as above as well as yuv444p and yuv444p10le)
-			""",
-
-			"label", "Profile",
-
-			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
-			"preset:Baseline",          "baseline",
-			"preset:Main",              "main",
-			"preset:High 4:2:0 8-bit",  "high",
-			"preset:High 4:2:0 10-bit", "high10",
-			"preset:High 4:2:2 8-bit",  "high422_8b",
-			"preset:High 4:2:2 10-bit", "high422_10b",
-			"preset:High 4:4:4 8-bit",  "high444_8b",
-			"preset:High 4:4:4 10-bit", "high444_10b",
-		],
 		"h264.preset" : [
 			"description",
 			"""
@@ -220,7 +195,22 @@ Gaffer.Metadata.registerNode(
 			"preset:Slow", "slow",
 			"preset:Slower", "slower",
 			"preset:Very slow", "veryslow",
-			"preset:Custom", "custom",
+		],
+		"h264.pix_fmt" : [
+			"description",
+			"""
+			Pixel format (YUV).
+			""",
+
+			"label", "Pixel Format",
+
+			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
+			"preset:4:2:0 8-bit",  "yuv420p",
+			"preset:4:2:0 10-bit", "yuv420p10",
+			"preset:4:2:2 8-bit",  "yuv422p",
+			"preset:4:2:2 10-bit", "yuv422p10",
+			"preset:4:4:4 8-bit",  "yuv444p",
+			"preset:4:4:4 10-bit", "yuv444p10",
 		],
 		"h264.tune" : [
 			"description",
@@ -266,83 +256,7 @@ Gaffer.Metadata.registerNode(
 
 			"label", "x264 Params",
 		],
-		"h264.qp" : [
-			"description",
-			"""
-			Constant quantization parameter rate control. 
-			Set to -1 to disable (use defaults).
-			""",
 
-			"label", "QP",
-		],
-
-		# "h264Advanced" : [
-		# 	"description",
-		# 	"""
-		# 	Advanced options.
-		# 	""",
-
-		# 	"plugValueWidget:type", "GafferUI.LayoutPlugValueWidget",
-		# 	"layout:section", "Settings.Advanced",
-		# 	# "layout:section:h264Advanced:collapsed", False,
-		# 	"layout:visibilityActivator", "h264_advanced",
-		# ],		
-		# "h264Advanced.gopSize" : [
-		# 	"description",
-		# 	"""
-		# 	Sets how many frames can be placed together to form a compression GOP (group of pictures).
-		# 	\n
-		# 	Use caution with this control as large alterations can stop other applications reading the rendered file.
-		# 	""",
-
-		# 	"label", "GOP Size",
-		# ],
-		# "h264Advanced.bFrames" : [
-		# 	"description",
-		# 	"""
-		# 	Sets the maximum number of B frames that can be consecutive in the rendered file.
-		# 	\n
-		# 	The default, 0, does not impose any maximum number of B frames in the output.
-		# 	""",
-
-		# 	"label", "B Frames",
-		# ],
-		# "h264Advanced.bitrate" : [
-		# 	"description",
-		# 	"""
-		# 	Sets the target bitrate that the codec attempts to reach, within the limits set by 
-		# 	the Bitrate Tolerance and Quantizer Min/Max controls.
-		# 	""",
-
-		# 	"label", "Bitrate",
-		# ],
-		# "h264Advanced.bitrateTolerance" : [
-		# 	"description",
-		# 	"""
-		# 	Sets the amount that the bitrate can vary from the Bitrate setting. 
-		# 	Setting this tolerance too low can result in renders failing.
-		# 	""",
-
-		# 	"label", "Bitrate Tolerance",
-		# ],
-		# "h264Advanced.qmin" : [
-		# 	"description",
-		# 	"""
-		# 	Sets the quality range within which the codec can vary the image to achieve the specified 
-		# 	bitrate. Higher ranges can introduce image degradation.			
-		# 	""",
-
-		# 	"label", "Quantizer Min",
-		# ],
-		# "h264Advanced.qmax" : [
-		# 	"description",
-		# 	"""
-		# 	Sets the quality range within which the codec can vary the image to achieve the specified 
-		# 	bitrate. Higher ranges can introduce image degradation.			
-		# 	""",
-
-		# 	"label", "Quantizer Max",
-		# ],
 		"prores" : [
 			"description",
 			"""

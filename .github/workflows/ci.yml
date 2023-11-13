@@ -12,15 +12,22 @@ on:
 env:
   CLANG_TIDY_VERSION: "10.0.1"
   PYTHON_VERSION: "3.7"
-  GAFFER_VERSION: "1.2.0.2"
+  GAFFER_ROOT: "/opt/gaffer-1.2.0.2"
+  FFMPEG_ROOT: "/opt/ffmpeg-5.1"
   VERBOSE: 1
-
 
 jobs:
   Test:
     runs-on: ubuntu-20.04 
+    permissions:
+      contents: read
+      packages: read
     container:
-      image: aswf/ci-base:2022  
+      image: ghcr.io/ilpvfx/ilp_gaffer_movie:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
     strategy:
       fail-fast: false
 
@@ -30,10 +37,10 @@ jobs:
       #   * make sure all supported configurations for your project are built
       #
       # Disable/enable builds in this list to meet the above recommendations
-      # and your own projects needs
+      # and your own projects needs.
       matrix:
         compiler:
-          # These are the installed compilers in the ASWF image specified above.
+          # These are the installed compilers in the container image specified above.
           - gcc-9.3.1
           - clang-10.0.1
         generator: 
@@ -42,11 +49,11 @@ jobs:
         build_type:
           - Release
           - Debug
-        packaging_maintainer_mode:
-          - ON
-          - OFF
-        build_shared:
-          - OFF
+        # packaging_maintainer_mode:
+        #   - ON
+        #   - OFF
+        # build_shared:
+        #   - OFF
 
         #include:
           # Add appropriate variables for gcov version required. This will intentionally break
@@ -81,66 +88,74 @@ jobs:
       #     script: |
       #       core.setFailed('There is a mismatch between configured llvm compiler and clang-tidy version chosen')
 
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Setup Cache
-        uses: ./.github/actions/setup_cache
-        with:
-          compiler: ${{ matrix.compiler }}
-          build_type: ${{ matrix.build_type }}
-          packaging_maintainer_mode: ${{ matrix.packaging_maintainer_mode }}
-          generator: ${{ matrix.generator }}
+      # - name: Setup Cache
+      #   uses: ./.github/actions/setup_cache
+      #   with:
+      #     compiler: ${{ matrix.compiler }}
+      #     build_type: ${{ matrix.build_type }}
+      #     packaging_maintainer_mode: ${{ matrix.packaging_maintainer_mode }}
+      #     generator: ${{ matrix.generator }}
 
       - name: Project Name
         uses: cardinalby/export-env-action@v2
         with:
           envFile: '.github/constants.env'
 
+      # - name: Setup Cpp
+      #   uses: aminya/setup-cpp@v1
+      #   with:
+      #     # compiler: ${{ matrix.compiler }}
+      #     # vcvarsall: ${{ contains(matrix.os, 'windows' )}}
 
-      - name: Setup Cpp
-        uses: aminya/setup-cpp@v1
-        with:
-          # compiler: ${{ matrix.compiler }}
-          # vcvarsall: ${{ contains(matrix.os, 'windows' )}}
-
-          cmake: true
-          ninja: false
-          vcpkg: false
-          ccache: false
-          clangtidy: false # ${{ env.CLANG_TIDY_VERSION }}
+      #     cmake: true
+      #     ninja: false
+      #     vcpkg: false
+      #     ccache: false
+      #     clangtidy: false # ${{ env.CLANG_TIDY_VERSION }}
 
 
-          cppcheck: false
+      #     cppcheck: false
 
-          gcovr: false
-          opencppcoverage: false
+      #     gcovr: false
+      #     opencppcoverage: false
 
       - name: Configure CMake
         run: |
-          cmake -S . -B ./build -G "${{matrix.generator}}" \
-          -D${{ env.PROJECT_NAME }}_ENABLE_IPO=${{matrix.enable_ipo }} \
+          cmake -S . -B ./build -G "${{ matrix.generator }}" \
           -DCMAKE_BUILD_TYPE:STRING=${{matrix.build_type}} \
+          -D${{ env.PROJECT_NAME }}_ENABLE_IPO=${{ matrix.enable_ipo }} \
           -D${{ env.PROJECT_NAME }}_PACKAGING_MAINTAINER_MODE:BOOL=${{matrix.packaging_maintainer_mode}} \
           -D${{ env.PROJECT_NAME }}_ENABLE_COVERAGE:BOOL=${{ matrix.build_type == 'Debug' }} \
-          -DGAFFER_VERSION:STRING=${{ env.GAFFER_VERSION }} \
           -DPYTHON_VERSION:STRING=${{ env.PYTHON_VERSION }} \
+          -DGAFFER_ROOT:STRING=${{ env.GAFFER_ROOT }} \
+          -DFFMPEG_ROOT=${{ env.FFMPEG_ROOT }} \
           -DGIT_SHA:STRING=${{ github.sha }}
 
       - name: Build
-        # Execute the build.  You can specify a specific target with "--target <NAME>"
+        # Execute the build. You can specify a specific target with "--target <NAME>"
         run: |
-          cmake --build ./build --config ${{matrix.build_type}}
+          cmake --build ./build --config ${{ matrix.build_type }}
 
-      - name: Unix - Test and coverage
-        # if: runner.os != 'Windows'
+      - name: Test
         working-directory: ./build
         # Execute tests defined by the CMake configuration.
         # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-        # run: |
-        #   ctest -C ${{matrix.build_type}}
-        #   gcovr -j ${{env.nproc}} --delete --root ../ --print-summary --xml-pretty --xml coverage.xml . --gcov-executable '${{ matrix.gcov_executable }}'
         run: |
-          ctest -C ${{matrix.build_type}}
+          ctest -C ${{ matrix.build_type }}
+
+      # - name: Unix - Test and coverage
+      #   # if: runner.os != 'Windows'
+      #   working-directory: ./build
+      #   # Execute tests defined by the CMake configuration.
+      #   # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      #   # run: |
+      #   #   ctest -C ${{matrix.build_type}}
+      #   #   gcovr -j ${{env.nproc}} --delete --root ../ --print-summary --xml-pretty --xml coverage.xml . --gcov-executable '${{ matrix.gcov_executable }}'
+      #   run: |
+      #     ctest -C ${{ matrix.build_type }}
 
       # - name: CPack
       #   if: matrix.package_generator != ''
