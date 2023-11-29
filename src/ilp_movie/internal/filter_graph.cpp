@@ -44,7 +44,10 @@ public:
       // Always free these before exiting.
       avfilter_inout_free(&inputs);
       avfilter_inout_free(&outputs);
-      if (!success) { _Free(); }
+      if (!success) {
+        // Make sure we tidy up any resources we might have allocated before exiting as a failure.
+        _Free();
+      }
       return success;
     };
 
@@ -69,7 +72,7 @@ public:
           //&& descr.in.sample_aspect_ratio.num > 0 && descr.in.sample_aspect_ratio.den > 0
           && descr.in.time_base.num > 0 && descr.in.time_base.den > 0
           && descr.out.pix_fmt != AV_PIX_FMT_NONE)) {
-      ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Bad filter graph description\n");            
+      ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Bad filter graph description\n");
       return exit_func(/*success=*/false);
     }
 
@@ -83,13 +86,13 @@ public:
           "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
           descr.in.width, descr.in.height, descr.in.pix_fmt,
           descr.in.time_base.num, descr.in.time_base.den,
-          descr.in.sample_aspect_ratio.num, descr.in.sample_aspect_ratio.den
+          descr.in.sample_aspect_ratio.num, FFMAX(descr.in.sample_aspect_ratio.den, 1)
 #else                 
           "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:frame_rate=%d/%d",
-          descr.codec_ctx->width, descr.codec_ctx->height, descr.in.pix_fmt,//codec_ctx->pix_fmt,
-          descr.in.time_base.num, descr.in.time_base.den,//descr.codec_ctx->time_base.num, descr.codec_ctx->time_base.den,
-          descr.codec_ctx->sample_aspect_ratio.num, FFMAX(descr.codec_ctx->sample_aspect_ratio.den, 1),
-          enc_ctx->framerate.num, enc_ctx->framerate.den                
+          descr.in.width, descr.in.height, descr.in.pix_fmt,
+          descr.in.time_base.num, descr.in.time_base.den,
+          descr.in.sample_aspect_ratio.num, FFMAX(descr.in.sample_aspect_ratio.den, 1),
+          descr.in.framerate.num, descr.in.framerate.den                
 #endif                
           ); (length_needed < 0 || length_needed >= static_cast<int>(kBufSize))) {
       ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Cannot create buffer source args\n");

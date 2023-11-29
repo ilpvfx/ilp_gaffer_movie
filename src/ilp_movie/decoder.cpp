@@ -55,7 +55,7 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    // Store pointer to stream, the format context owns it.
+    // Store pointer to stream, the format context still owns the stream.
     assert(_av_stream == nullptr);// NOLINT
     _av_stream = av_fmt_ctx->streams[stream_index];// NOLINT
 
@@ -78,14 +78,14 @@ public:
     }
 
     if (thread_count > 0) {
-#if 0// NOTE(tohi): experimental, not tested.
-        if (stream->codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
-          _av_codec_context->thread_count = thread_count;
-          _av_codec_context->thread_type = FF_THREAD_SLICE;// NOLINT
+#if 1// NOTE(tohi): experimental, not tested.
+        if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
+          _av_codec_ctx->thread_count = thread_count;
+          _av_codec_ctx->thread_type = FF_THREAD_SLICE;// NOLINT
         }
-        if (stream->codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
-          _av_codec_context->thread_count = thread_count;
-          _av_codec_context->thread_type |= FF_THREAD_FRAME;// NOLINT
+        if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
+          _av_codec_ctx->thread_count = thread_count;
+          _av_codec_ctx->thread_type |= FF_THREAD_FRAME;// NOLINT
         }
 #endif
     }
@@ -108,9 +108,6 @@ public:
       log_utils_internal::LogAvError("Cannot allocate frame for stream", AVERROR(ENOMEM));
       return exit_func(/*success=*/false);
     }
-#if 0
-      _av_codec_context->opaque = this;// Why?
-#endif
 
     _start_time = _av_stream->start_time;
     if (_start_time == AV_NOPTS_VALUE) {
@@ -227,7 +224,7 @@ private:
       av_frame_free(&_av_frame);
       assert(_av_frame == nullptr);// NOLINT
     }
-    _start_time = 0;
+    _start_time = AV_NOPTS_VALUE;
     _frame_count = 0;
     _frame_rate = { /*.num=*/0, /*.den=*/1 };
   }
@@ -236,7 +233,7 @@ private:
   AVCodecContext *_av_codec_ctx = nullptr;
   AVFrame *_av_frame = nullptr;
 
-  int64_t _start_time = 0;
+  int64_t _start_time = AV_NOPTS_VALUE;
   int64_t _frame_count = 0;
   AVRational _frame_rate = { /*.num=*/0, /*.den=*/1 };
 };
@@ -264,6 +261,34 @@ public:
       if (!success) { Close(); }
       return success;
     };
+
+#if 0 // TMP!!
+    // enumerate all codecs and put into list
+    std::vector<const AVCodec*> video_codecs;
+    {
+      const AVCodec * codec = nullptr;
+      void* opaque = nullptr;
+      while ((codec = av_codec_iterate(&opaque))) {
+        if (codec->type == AVMEDIA_TYPE_VIDEO) {
+          video_codecs.push_back(codec);
+        }
+      }
+    }
+
+    // enumerate all containers
+    const AVInputFormat *ifmt = nullptr;
+    void* opaque = nullptr;
+    while ((ifmt = av_demuxer_iterate(&opaque))) {//NOLINT
+      ifmt->codec_tag
+      if ()
+      // for (auto codec : encoderList) {
+      //   // only add the codec if it can be used with this container
+      //   if (avformat_query_codec(outputFormat, codec->id, FF_COMPLIANCE_STRICT) == 1) {
+      //     // add codec for container
+      //   }
+      // }
+    }
+#endif
 
     Close();
 
@@ -312,8 +337,6 @@ public:
         av_dump_format(_av_fmt_ctx, stream_index, _url.c_str(), /*is_output=*/0);
 
         filter_graph_internal::FilterGraphDescription fg_descr{};
-        fg_descr.filter_descr = "null";
-        fg_descr.sws_flags = "";
         fg_descr.in.width = video_stream->CodecContext()->width;
         fg_descr.in.height = video_stream->CodecContext()->height;
         fg_descr.in.pix_fmt = video_stream->CodecContext()->pix_fmt;
@@ -342,6 +365,10 @@ public:
 
   [[nodiscard]] auto IsOpen() const noexcept -> bool { return !_url.empty(); }
 
+  [[nodiscard]] auto Url() const noexcept -> std::string {
+    return _url;
+  }
+
   void Close()
   {
     _url.clear();
@@ -354,6 +381,7 @@ public:
       av_packet_free(&_av_packet);
       assert(_av_packet == nullptr);// NOLINT
     }
+    _best_video_stream = -1;
     _video_streams.clear();
   }
 
@@ -406,7 +434,7 @@ public:
     fg_descr.out.pix_fmt = AV_PIX_FMT_GBRPF32;// TODO(tohi): is this always good?
     auto fg = std::make_unique<filter_graph_internal::FilterGraph>();
     if (!fg->SetDescription(fg_descr)) {
-      ilp_movie::LogMsg(ilp_movie::LogLevel::kWarning, "Failed constructing filter graph\n");
+      LogMsg(LogLevel::kWarning, "Failed constructing filter graph\n");
       return false;
     }
     fs_iter->second.filter_graph = std::move(fg);
@@ -416,85 +444,87 @@ public:
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool
   {
-  Stream *stream = nullptr;
-  filter_graph_internal::FilterGraph *filter_graph = nullptr;
-  if (const auto fs_iter = _video_streams.find(stream_index); fs_iter != _video_streams.end()) {
-    stream = fs_iter->second.stream.get();
-    filter_graph = fs_iter->second.filter_graph.get();
-  } else {
-    // TODO: log warning
-    return false;
-  }
-  assert(stream != nullptr);// NOLINT
-  assert(filter_graph != nullptr);// NOLINT
+    Stream *stream = nullptr;
+    filter_graph_internal::FilterGraph *filter_graph = nullptr;
+    if (const auto fs_iter = _video_streams.find(stream_index); fs_iter != _video_streams.end()) {
+      stream = fs_iter->second.stream.get();
+      filter_graph = fs_iter->second.filter_graph.get();
+    } else {
+      // TODO: log warning
+      LogMsg(LogLevel::kWarning, "Bad stream index for decoding video frame\n");
+      return false;
+    }
+    assert(stream != nullptr);// NOLINT
+    assert(filter_graph != nullptr);// NOLINT
 
-  const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
+    const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
-  constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
-  if (const int ret = av_seek_frame(_av_fmt_ctx, stream->Get()->index, timestamp, kSeekFlags);
-      ret < 0) {
-    log_utils_internal::LogAvError("Cannot seek to timestamp", ret);
-    return false;
-  }
-
-  stream->FlushCodec();
-
-  bool got_frame = false;// TODO??!?!?
-  bool keep_going = true;
-  int ret = 0;
-  while (ret >= 0 && keep_going) {
-    // Read a packet, which for video streams corresponds to one frame.
-    ret = av_read_frame(_av_fmt_ctx, _av_packet);
-
-    // A packet was successfully read, check if was from the stream we are interested in.
-    if (ret >= 0 && _av_packet->stream_index != stream->Get()->index) {
-      // Ignore packets that are not from the video stream we are trying to read from.
-      av_packet_unref(_av_packet);
-      continue;
+    constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;
+    if (const int ret = av_seek_frame(_av_fmt_ctx, stream->Get()->index, timestamp, kSeekFlags);
+        ret < 0) {
+      log_utils_internal::LogAvError("Cannot seek to timestamp", ret);
+      return false;
     }
 
-    // TODO(tohi): Can we seek based on packet PTS?
+    stream->FlushCodec();
 
-    keep_going =
-      stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *dec_frame) {
-        // TODO(tohi): Can we seek based on frame PTS? Check frame PTS before sending to filter
-        // graph?
-        bool keep_going_dec = true;
-        if (dec_frame->pts <= timestamp && timestamp < (dec_frame->pts + dec_frame->pkt_duration)) {
-          keep_going_dec = filter_graph->FilterFrames(dec_frame, [&](AVFrame *filt_frame) {
-            // Check if the frame has a PTS/duration that matches our seek target.
-            bool keep_going_filt = true;
-            if (filt_frame->pts <= timestamp
-                && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
-              // Found a frame with a good PTS so we do not need to look for more frames.
-              // This is our one chance.
-              keep_going_filt = false;
+    bool got_frame = false;
+    bool keep_going = true;
+    int ret = 0;
+    while (ret >= 0 && keep_going) {
+      // Read a packet, which for video streams corresponds to one frame.
+      ret = av_read_frame(_av_fmt_ctx, _av_packet);
 
-              dvf.pix_fmt = PixelFormat::kNone;
-              switch (filt_frame->format) {
-              case AV_PIX_FMT_GRAYF32:
-                dvf.pix_fmt = PixelFormat::kGray;
-                break;
-              case AV_PIX_FMT_GBRPF32:
-                dvf.pix_fmt = PixelFormat::kRGB;
-                break;
-              case AV_PIX_FMT_GBRAPF32:
-                dvf.pix_fmt = PixelFormat::kRGBA;
-                break;
-              default:
-                LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-                return keep_going_filt;
-              }
+      // A packet was successfully read, check if was from the stream we are interested in.
+      if (ret >= 0 && _av_packet->stream_index != stream->Get()->index) {
+        // Ignore packets that are not from the video stream we are trying to read from.
+        av_packet_unref(_av_packet);
+        continue;
+      }
 
-              // clang-format off
-              dvf.width = filt_frame->width;
-              dvf.height = filt_frame->height;
-              dvf.key_frame = filt_frame->key_frame > 0;
-              dvf.frame_nb = frame_nb;
-              dvf.pixel_aspect_ratio = { 
-                /*.num=*/filt_frame->sample_aspect_ratio.num,
-                /*.den=*/filt_frame->sample_aspect_ratio.den 
-              };
+      // TODO(tohi): Can we seek based on packet PTS? Not all formats/streams support
+      //             packet PTS.
+
+      keep_going =
+        stream->ReceiveFrames(ret >= 0 ? _av_packet : /*flush*/ nullptr, [&](AVFrame *dec_frame) {
+          // TODO(tohi): Can we seek based on frame PTS? Check frame PTS before sending to filter
+          // graph?
+          bool keep_going_dec = true;
+          if (dec_frame->pts <= timestamp && timestamp < (dec_frame->pts + dec_frame->pkt_duration)) {
+            keep_going_dec = filter_graph->FilterFrames(dec_frame, [&](AVFrame *filt_frame) {
+              // Check if the frame has a PTS/duration that matches our seek target.
+              bool keep_going_filt = true;
+              if (filt_frame->pts <= timestamp
+                  && timestamp < (filt_frame->pts + filt_frame->pkt_duration)) {
+                // Found a frame with a good PTS so we do not need to look for more frames.
+                // This is our one chance.
+                keep_going_filt = false;
+
+                dvf.pix_fmt = PixelFormat::kNone;
+                switch (filt_frame->format) {
+                case AV_PIX_FMT_GRAYF32:
+                  dvf.pix_fmt = PixelFormat::kGray;
+                  break;
+                case AV_PIX_FMT_GBRPF32:
+                  dvf.pix_fmt = PixelFormat::kRGB;
+                  break;
+                case AV_PIX_FMT_GBRAPF32:
+                  dvf.pix_fmt = PixelFormat::kRGBA;
+                  break;
+                default:
+                  LogMsg(LogLevel::kError, "Unsupported pixel format\n");
+                  return keep_going_filt;
+                }
+
+                // clang-format off
+                dvf.width = filt_frame->width;
+                dvf.height = filt_frame->height;
+                dvf.key_frame = filt_frame->key_frame > 0;
+                dvf.frame_nb = frame_nb;
+                dvf.pixel_aspect_ratio = { 
+                  /*.num=*/filt_frame->sample_aspect_ratio.num,
+                  /*.den=*/filt_frame->sample_aspect_ratio.den 
+                };
                 // clang-format on
 
                 constexpr std::array<Channel, 4> kChannels = {
@@ -525,8 +555,7 @@ public:
           }
           return keep_going_dec;
         });
-    }
-
+      }
     return got_frame;
 
     // _av_frame->crop_top
@@ -561,6 +590,10 @@ Decoder::~Decoder() = default;
 auto Decoder::Open(std::string url) noexcept -> bool { return Pimpl()->Open(std::move(url)); }
 
 auto Decoder::IsOpen() const noexcept -> bool { return Pimpl()->IsOpen(); }
+
+auto Decoder::Url() const noexcept -> std::string {
+  return Pimpl()->Url();
+}
 
 void Decoder::Close() noexcept { Pimpl()->Close(); }
 

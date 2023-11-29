@@ -4,6 +4,11 @@ import Gaffer
 import GafferUI
 import IlpGafferMovie
 
+from GafferUI.PlugValueWidget import sole
+
+from GafferImageUI import OpenColorIOTransformUI
+
+from GafferUI.PlugValueWidget import sole
 
 # fmt: off
 Gaffer.Metadata.registerNode(
@@ -28,10 +33,11 @@ Gaffer.Metadata.registerNode(
 			"plugValueWidget:type", "GafferUI.FileSystemPathPlugValueWidget",
 			"path:leaf", True,
 			#"path:bookmarks", "image",
-			# TODO(tohi): get supported extensions from libav?
-			# "fileSystemPath:extensions", " ".join( GafferImage.ImageReader.supportedExtensions() ),
-			#"fileSystemPath:extensionsLabel", "Show only video files",
-			#"fileSystemPath:includeSequences", True,
+			#
+			#TODO(tohi): "path:bookmarks", "video",
+			"fileSystemPath:extensions", " ".join( IlpGafferMovie.MovieReader.supportedExtensions() ),
+			"fileSystemPath:extensionsLabel", "Show only video files",
+			"fileSystemPath:includeSequences", False,
 
 		],
 
@@ -47,6 +53,24 @@ Gaffer.Metadata.registerNode(
 			"plugValueWidget:type", "GafferUI.RefreshPlugValueWidget",
 			"layout:label", "",
 			"layout:accessory", True,
+
+		],
+
+		"videoStreamIndex" : [
+
+			"description",
+			"""
+			The index of the video stream to be read. 
+			""",
+			#"presetNames", lambda plug : IECore.StringVectorData( [ str(x) for x in plug.node()["__avReader"]["availableStreamInfo"].getValue() ] ),
+			"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
+			"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
+
+			# "presetNames", IECore.StringVectorData( [ "best (stream #0)", "stream #0", "stream #1" ] ),
+			# "presetValues", IECore.IntVectorData( [ 0, 0, 1] ),
+
+			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
+			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
 
 		],
 
@@ -148,6 +172,154 @@ Gaffer.Metadata.registerNode(
 
 		],
 
+		"colorSpace" : [
+
+			"description",
+			"""
+			The colour space of the input image, used to convert the input to
+			the working space. When set to `Automatic`, the colour space is
+			determined automatically using the function registered with
+			`ImageReader::setDefaultColorSpaceFunction()`.
+			""",
+
+			"presetNames", OpenColorIOTransformUI.colorSpacePresetNames,
+			"presetValues", OpenColorIOTransformUI.colorSpacePresetValues,
+			"openColorIO:categories", "file-io",
+			"openColorIO:extraPresetNames", IECore.StringVectorData( [ "Automatic" ] ),
+			"openColorIO:extraPresetValues", IECore.StringVectorData( [ "" ] ),
+
+			"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._ColorSpacePlugValueWidget",
+
+		],
+
+		"availableFrames" : [
+
+			"description",
+			"""
+			A list of the available frames for the current file.
+			""",
+
+			"layout:section", "Frames",
+			"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._AvailableFramesPlugValueWidget",
+
+		],
+
+		"fileValid" : [
+			"description",
+			"""
+			Whether or not the file exists and can be read into memory. Behaviour 
+			changes	if a frame mask of ClampToFrame or Black is selected, if outside
+			the frame mask fileValid will be set to True if the nearest frame is valid.
+			""",
+
+			"layout:section", "Frames",
+		]
+
 	}
 )
+
+# Augments PresetsPlugValueWidget label with the computed colour space
+# when preset is "Automatic". Since this involves opening the file to
+# read metadata, we do the work in the background via an auxiliary plug
+# passed to `_valuesForUpdate()`.
+class _ColorSpacePlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
+
+	def __init__( self, plugs, **kw ) :
+
+		GafferUI.PresetsPlugValueWidget.__init__( self, plugs, **kw )
+
+	@staticmethod
+	def _valuesForUpdate( plugs, auxiliaryPlugs ) :
+
+		presets = GafferUI.PresetsPlugValueWidget._valuesForUpdate( plugs, [ [] for p in plugs ] )
+
+		result = []
+		for preset, colorSpacePlugs in zip( presets, auxiliaryPlugs ) :
+
+			automaticSpace = ""
+			if len( colorSpacePlugs ) and preset == "Automatic" :
+				with IECore.IgnoredExceptions( Gaffer.ProcessException ) :
+					automaticSpace = colorSpacePlugs[0].getValue() or "Working Space"
+
+			result.append( {
+				"preset" : preset,
+				"automaticSpace" : automaticSpace
+			} )
+
+		return result
+
+	def _updateFromValues( self, values, exception ) :
+
+		GafferUI.PresetsPlugValueWidget._updateFromValues( self, [ v["preset"] for v in values ], exception )
+
+		if self.menuButton().getText() == "Automatic" :
+			automaticSpace = sole( v["automaticSpace"] for v in values )
+			if automaticSpace != "" :
+				self.menuButton().setText( "Automatic ({})".format( automaticSpace or "---" ) )
+
+	def _auxiliaryPlugs( self, plug ) :
+
+		node = plug.node()
+		if isinstance( node, IlpGafferMovie.MovieReader ) :
+			return [ node["__intermediateColorSpace"] ]
+
+
+class _AvailableFramesPlugValueWidget( GafferUI.PlugValueWidget ) :
+
+	def __init__( self, plug, **kw ) :
+
+		self.__textWidget = GafferUI.TextWidget( editable = False )
+		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
+
+	def _updateFromValues( self, values, exception ) :
+
+		value = sole( values )
+		if value is None :
+			self.__textWidget.setText( "---" )
+		else :
+			self.__textWidget.setText( str( IECore.frameListFromList( list( value ) ) ) )
+
+		self.__textWidget.setErrored( exception is not None )
+
+class _VideoStreamPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
+
+	def __init__( self, plug, **kw ) :
+
+		self.__textWidget = GafferUI.TextWidget( editable = False )
+		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
+
+	@staticmethod
+	def _valuesForUpdate( plugs, auxiliaryPlugs ) :
+
+		presets = GafferUI.PresetsPlugValueWidget._valuesForUpdate( plugs, [ [] for p in plugs ] )
+
+		result = []
+		for preset, colorSpacePlugs in zip( presets, auxiliaryPlugs ) :
+
+			bestStream = ""
+			if len( colorSpacePlugs ) and preset == "Best" :
+				with IECore.IgnoredExceptions( Gaffer.ProcessException ) :
+					automaticSpace = colorSpacePlugs[0].getValue() or "Working Space"
+
+			result.append( {
+				"preset" : preset,
+				"automaticSpace" : automaticSpace
+			} )
+
+		return result
+
+	def _updateFromValues( self, values, exception ) :
+
+		if not len( values ): 
+			self.__textWidget.setText( "---" )
+
+		self.__textWidget.setErrored( exception is not None )
+
+	def _auxiliaryPlugs( self, plug ) :
+
+		node = plug.node()
+		if isinstance( node, IlpGafferMovie.MovieReader ) :
+			return [ node["__avReader"] ]
+
+
 # fmt: on

@@ -77,6 +77,7 @@ public:
 
   [[nodiscard]] auto Open(std::string url) noexcept -> bool;
   [[nodiscard]] auto IsOpen() const noexcept -> bool;
+  [[nodiscard]] auto Url() const noexcept -> std::string;
 
   void Close() noexcept;
 
