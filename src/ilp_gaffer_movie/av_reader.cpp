@@ -68,6 +68,7 @@ std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0U;
   //boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
+  boost::hash_combine(seed, k.decoder);// NOLINT
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
@@ -877,7 +878,8 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
     (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
   const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
-  if (decoder == nullptr || !decoder->IsOpen()) { return nullptr; }
+  if (decoder == nullptr) { return nullptr; }
+  if (!decoder->IsOpen()) { return nullptr; }
 
   int video_stream_index = videoStreamIndexPlug()->getValue();
   if (video_stream_index < 0) {
