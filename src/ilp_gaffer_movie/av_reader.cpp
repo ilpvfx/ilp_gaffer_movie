@@ -21,10 +21,10 @@
 #include <Gaffer/Context.h>
 #include <Gaffer/StringPlug.h>
 
-namespace {
-struct FrameCacheKey;
-inline std::size_t hash_value(const FrameCacheKey &k);
-}// namespace
+// namespace {
+// struct FrameCacheKey;
+// inline std::size_t hash_value(const FrameCacheKey &k);
+// }// namespace
 
 #include <boost/bind/bind.hpp>
 #include <boost/functional/hash.hpp>
@@ -64,7 +64,7 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
   // clang-format on
 }
 
-std::size_t hash_value(const FrameCacheKey &/*k*/)
+std::size_t hash_value(const FrameCacheKey &k)
 {
 #if 0
   std::size_t seed = 0U;
@@ -74,6 +74,8 @@ std::size_t hash_value(const FrameCacheKey &/*k*/)
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
 #else 
+  std::size_t seed = 0U;
+  boost::hash_combine(seed, k.frame_nb);// NOLINT
   return 42U;
 #endif
 }
