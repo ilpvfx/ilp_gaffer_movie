@@ -11,10 +11,15 @@
 
 namespace ilp_movie {
 
-struct DecodeVideoStreamInfo
+struct InputVideoStreamHeader
 {
   int stream_index = -1;
   bool is_best = false;
+
+  // One-based frame number range. Seek should return valid frames for the inclusive range:
+  // [first, first + count - 1].
+  int64_t first_frame_nb = -1;
+  int64_t frame_count = 0;
 
   int width = -1;
   int height = -1;
@@ -24,10 +29,12 @@ struct DecodeVideoStreamInfo
     int den = 0;
   } frame_rate;
 
-  // One-based frame number range. Seek should return valid frames for the inclusive range:
-  // [first, first + count - 1].
-  int64_t first_frame_nb = -1;
-  int64_t frame_count = 0;
+  // Pixel width / height.
+  struct
+  {
+    int num = 0;
+    int den = 0;
+  } pixel_aspect_ratio;
 
   // PixelFormat pix_fmt = PixelFormat::kNone;
 
@@ -60,10 +67,25 @@ struct DecodedVideoFrame
   } buf = {};
 };
 
+struct DecoderFilterGraphDescription
+{
+  // Pass-through (for video), use "anull" for audio.
+  std::string filter_descr = "null";
+
+  // The pixel format of the decoded frames after they've been pulled from
+  // the filter graph. This string will be converted to a suitable enum internally
+  // but we don't want to expose those enum types on this interface.
+  //
+  // E.g. "gbrpf32le" for 32-bit float (planar) RGB frames.
+  std::string out_pix_fmt_name = "";
+};
+
 class DecoderImpl;
 class ILP_MOVIE_EXPORT Decoder
 {
 public:
+  [[nodiscard]] static auto SupportedFormats() -> std::vector<std::string>;
+
   Decoder();
   ~Decoder();
 
@@ -75,17 +97,31 @@ public:
   Decoder(const Decoder &rhs) = delete;
   Decoder &operator=(const Decoder &rhs) = delete;
 
-  [[nodiscard]] auto Open(std::string url) noexcept -> bool;
-  [[nodiscard]] auto IsOpen() const noexcept -> bool;
-  [[nodiscard]] auto Url() const noexcept -> std::string;
+  [[nodiscard]] auto Open(const std::string &url,
+    const DecoderFilterGraphDescription &dfgd) noexcept -> bool;
 
+  // Returns true if the decoder has been successfully opened and has not been closed since.
+  [[nodiscard]] auto IsOpen() const noexcept -> bool;
+
+  // The URL (file name) that is currently open, empty if the decoder
+  // is not in an open state.
+  [[nodiscard]] auto Url() const noexcept -> const std::string &;
+
+  // Reset the state of the decoder, clearing all cached information putting the
+  // decoder in a state as if no file has been opened.
   void Close() noexcept;
 
-  [[nodiscard]] auto VideoStreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>;
+  // Returns the video stream index considered to be "best", which is implementation defined.
+  // If no such index can be determined returns a negative number. For instance, this could happen
+  // if the opened file contains no video streams, or if no file has been opened.
+  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> int;
 
-  [[nodiscard]] auto SetFilterGraph(int stream_index,
-    std::string filter_descr = "null",
-    std::string sws_flags = "") noexcept -> bool;
+  // Returns the header information for the video streams in the currently opened file.
+  // The list an empty list if no file has been opened.
+  //
+  // Note that some properties, such as pixel format, may differ from the decoded frames,
+  // since those are potentially pushed through a filter graph.
+  [[nodiscard]] auto VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &;
 
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool;

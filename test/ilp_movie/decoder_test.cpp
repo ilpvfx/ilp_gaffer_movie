@@ -1,8 +1,10 @@
 #include <algorithm>// std::shuffle
 #include <iostream>// std::cout, std::cerr
+#include <mutex>//std::call_once
 #include <random>// std::default_random_engine
 #include <sstream>// std::ostringstream
 #include <string>// std::string
+#include <thread>//std::thread
 #include <vector>// std::vector
 
 #include <catch2/catch_test_macros.hpp>
@@ -297,24 +299,29 @@ TEST_CASE("seek(prores)")
 
     {// Read.
       ilp_movie::Decoder decoder{};
-      REQUIRE(dump_log_on_fail(decoder.Open(kFilename.data())));
+      REQUIRE(dump_log_on_fail(decoder.Open(kFilename.data(),
+        ilp_movie::DecoderFilterGraphDescription{
+          "scale=in_color_matrix=bt709:out_color_matrix=bt709"
+          ":flags=print_info+spline+accurate_rnd+full_chroma_int+full_chroma_inp",
+          "gbrpf32le" })));
 
-      std::vector<ilp_movie::DecodeVideoStreamInfo> stream_info = decoder.VideoStreamInfo();
-      REQUIRE(dump_log_on_fail(stream_info.size() == 1U));
-      REQUIRE(dump_log_on_fail(stream_info[0].stream_index == 0));
-      REQUIRE(dump_log_on_fail(stream_info[0].is_best == true));
-      REQUIRE(dump_log_on_fail(stream_info[0].width == kWidth));
-      REQUIRE(dump_log_on_fail(stream_info[0].height == kHeight));
-      REQUIRE(dump_log_on_fail(stream_info[0].first_frame_nb == 1));
-      REQUIRE(dump_log_on_fail(stream_info[0].frame_count == 200));
+      auto &&vsh = decoder.VideoStreamHeaders();
+      REQUIRE(dump_log_on_fail(vsh.size() == 1U));
+      REQUIRE(dump_log_on_fail(vsh[0].stream_index == 0));
+      REQUIRE(dump_log_on_fail(vsh[0].is_best == true));
+      REQUIRE(dump_log_on_fail(vsh[0].width == kWidth));
+      REQUIRE(dump_log_on_fail(vsh[0].height == kHeight));
+      REQUIRE(dump_log_on_fail(vsh[0].first_frame_nb == 1));
+      REQUIRE(dump_log_on_fail(vsh[0].frame_count == 200));
 
+      // clang-format off
       //"scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709";
-      REQUIRE(decoder.SetFilterGraph(stream_info[0].stream_index,
-        /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709"
-#if 0        
-        , /*sws_flags=*/"flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"
-#endif
-        ));
+      // REQUIRE(decoder.SetFilterGraph(vsh[0].stream_index,
+      //   /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709"
+      //                      ":flags=print_info+spline+accurate_rnd+full_chroma_int+full_chroma_inp"
+      //                      //":flags=print_info+gauss"
+      //   ));
+      // clang-format on
 
       const auto frame_stats = SeekFrames(decoder, kFrameCount);
       REQUIRE(dump_log_on_fail(frame_stats.size() == kFrameCount));
@@ -346,6 +353,8 @@ TEST_CASE("seek(prores)")
   dump_log_on_fail(false);// TMP!!
 }
 
+std::once_flag write_h264{};
+
 TEST_CASE("seek(h.264)")
 {
   std::vector<std::string> log_lines = {};
@@ -362,60 +371,132 @@ TEST_CASE("seek(h.264)")
     return cond;
   };
 
+  constexpr std::string_view kFilename = "/tmp/test_data/demux_test_h264.mp4"sv;
+  constexpr int kWidth = 640;
+  constexpr int kHeight = 480;
+  constexpr int kFrameCount = 200;
+  std::call_once(write_h264, [&]() {
+    // Write.
+    auto mux_params = ilp_movie::MakeMuxParameters(
+      kFilename, kWidth, kHeight, /*frame_rate=*/24.0, ilp_movie::H264::EncodeParameters{});
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    REQUIRE(dump_log_on_fail(WriteFrames(*mux_ctx, kFrameCount)));
+    mux_ctx.reset();
+  });
+
   SECTION("RGB")
   {
-    constexpr std::string_view kFilename = "/tmp/test_data/demux_test_h264.mp4"sv;
-    constexpr int kWidth = 640;
-    constexpr int kHeight = 480;
-    constexpr int kFrameCount = 200;
+    // Read.
+    ilp_movie::Decoder decoder{};
+    REQUIRE(dump_log_on_fail(decoder.Open(
+      kFilename.data(), ilp_movie::DecoderFilterGraphDescription{ "null", "gbrpf32le" })));
 
-    {// Write.
-      auto mux_params = ilp_movie::MakeMuxParameters(
-        kFilename, kWidth, kHeight, 24.0, ilp_movie::H264::EncodeParameters{});
-      REQUIRE(dump_log_on_fail(mux_params.has_value()));
-      auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
-      REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
-      REQUIRE(dump_log_on_fail(WriteFrames(*mux_ctx, kFrameCount)));
-      mux_ctx.reset();
+    auto &&vsh = decoder.VideoStreamHeaders();
+    REQUIRE(dump_log_on_fail(vsh.size() == 1U));
+    REQUIRE(dump_log_on_fail(vsh[0].stream_index == 0));
+    REQUIRE(dump_log_on_fail(vsh[0].is_best == true));
+    REQUIRE(dump_log_on_fail(vsh[0].width == kWidth));
+    REQUIRE(dump_log_on_fail(vsh[0].height == kHeight));
+    REQUIRE(dump_log_on_fail(vsh[0].first_frame_nb == 1));
+    REQUIRE(dump_log_on_fail(vsh[0].frame_count == kFrameCount));
+
+    const auto frame_stats = SeekFrames(decoder, kFrameCount);
+    REQUIRE(dump_log_on_fail(frame_stats.size() == kFrameCount));
+
+    int bad_frame = -1;
+    for (int i = 0; i < kFrameCount; ++i) {
+      const auto &fs = frame_stats.at(static_cast<std::size_t>(i));
+
+      // clang-format off
+      if (!(0.0 <= fs.r_avg_err && fs.r_avg_err < 0.01 &&
+            0.0 <= fs.g_avg_err && fs.g_avg_err < 0.01 &&
+            0.0 <= fs.b_avg_err && fs.b_avg_err < 0.01 &&
+            0.0 <= fs.r_max_err && fs.r_max_err < 0.15 &&
+            0.0 <= fs.g_max_err && fs.g_max_err < 0.15 &&
+            0.0 <= fs.b_max_err && fs.b_max_err < 0.15)) {
+        bad_frame = i;
+        break;
+      }
+      // clang-format on
     }
+    REQUIRE(dump_log_on_fail(bad_frame == -1));
+  }
 
-    {// Read.
-      ilp_movie::Decoder decoder{};
-      REQUIRE(dump_log_on_fail(decoder.Open(kFilename.data())));
+  SECTION("multiple_decoders_same_file")
+  {
+    ilp_movie::Decoder d0{};
+    ilp_movie::Decoder d1{};
+    REQUIRE(dump_log_on_fail(d0.Open(kFilename.data(),
+      ilp_movie::DecoderFilterGraphDescription{
+        "scale=in_color_matrix=bt709:out_color_matrix=bt709"
+        ":flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp, vflip",
+        "gbrpf32le" })));
+    REQUIRE(dump_log_on_fail(d1.Open(kFilename.data(),
+      ilp_movie::DecoderFilterGraphDescription{
+        "scale=w=in_w/2:h=in_h/2:flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp",
+        "gbrpf32le" })));
 
-      std::vector<ilp_movie::DecodeVideoStreamInfo> stream_info = decoder.VideoStreamInfo();
-      REQUIRE(dump_log_on_fail(stream_info.size() == 1U));
-      REQUIRE(dump_log_on_fail(stream_info[0].stream_index == 0));
-      REQUIRE(dump_log_on_fail(stream_info[0].is_best == true));
-      REQUIRE(dump_log_on_fail(stream_info[0].width == kWidth));
-      REQUIRE(dump_log_on_fail(stream_info[0].height == kHeight));
-      REQUIRE(dump_log_on_fail(stream_info[0].first_frame_nb == 1));
-      REQUIRE(dump_log_on_fail(stream_info[0].frame_count == kFrameCount));
 
-      const auto frame_stats = SeekFrames(decoder, kFrameCount);
-      REQUIRE(dump_log_on_fail(frame_stats.size() == kFrameCount));
+    REQUIRE(dump_log_on_fail(d0.BestVideoStreamIndex() == 0));
+    REQUIRE(dump_log_on_fail(d1.BestVideoStreamIndex() == 0));
+    const int stream_index = 0;
 
-      int bad_frame = -1;
-      for (int i = 0; i < kFrameCount; ++i) {
-        const auto &fs = frame_stats.at(static_cast<std::size_t>(i));
+//     REQUIRE(dump_log_on_fail(d0.SetFilterGraph(stream_index,
+// #if 0
+//       /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709, vflip",
+//       /*sws_flags=*/"flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"
+// #else
+//       /*filter_descr=*/
+//       "scale=in_color_matrix=bt709:out_color_matrix=bt709:flags=spline+accurate_rnd+full_chroma_"
+//       "int+full_chroma_inp, vflip"
+// #endif
+//       )));
+//     REQUIRE(dump_log_on_fail(d1.SetFilterGraph(stream_index,
+//       /*filter_descr=*/
+//       "scale=w=in_w/2:h=in_h/2:flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp")));
 
-        // clang-format off
-        if (!(0.0 <= fs.r_avg_err && fs.r_avg_err < 0.01 &&
-              0.0 <= fs.g_avg_err && fs.g_avg_err < 0.01 &&
-              0.0 <= fs.b_avg_err && fs.b_avg_err < 0.01 &&
-              0.0 <= fs.r_max_err && fs.r_max_err < 0.15 &&
-              0.0 <= fs.g_max_err && fs.g_max_err < 0.15 &&
-              0.0 <= fs.b_max_err && fs.b_max_err < 0.15)) {
-          bad_frame = i;
+    int fail0 = -1;
+    int fail1 = -1;
+    std::thread t0{ [&d0, &fail0]() {
+      ilp_movie::DecodedVideoFrame dvf{};
+      for (int f = 1; f <= kFrameCount; ++f) {
+        if (!d0.DecodeVideoFrame(stream_index, f, /*out*/ dvf)) {
+          fail0 = f;
           break;
         }
-        // clang-format on
       }
-      REQUIRE(dump_log_on_fail(bad_frame == -1));
-    }
+    } };
+    std::thread t1{ [&d1, &fail1]() {
+      ilp_movie::DecodedVideoFrame dvf{};
+      for (int f = 1; f <= kFrameCount; ++f) {
+        if (!d1.DecodeVideoFrame(stream_index, f, /*out*/ dvf)) {
+          fail1 = f;
+          break;
+        }
+
+        if (!(dvf.width == kWidth / 2 && dvf.height == kHeight / 2)) {
+          fail1 = f;
+          break;
+        }
+      }
+    } };
+
+    t0.join();
+    t1.join();
+
+    REQUIRE(dump_log_on_fail(fail0 == -1));
+    REQUIRE(dump_log_on_fail(fail1 == -1));
   }
 
   // dump_log_on_fail(false);// TMP!!
+}
+
+TEST_CASE("supported formats")
+{
+  auto &&fmts0 = ilp_movie::Decoder::SupportedFormats();
+  REQUIRE(!fmts0.empty());
 }
 
 }// namespace

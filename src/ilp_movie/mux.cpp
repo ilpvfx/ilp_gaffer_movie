@@ -395,9 +395,9 @@ auto MakeMuxParameters(const std::string_view filename,
   p.colorspace = enc_params.colorspace;
   p.color_trc = enc_params.color_trc;
 
-  p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
   p.filter_graph =
-    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"sv;
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"
+    ":flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
 
   p.codec_name = "libx264";
   p.preset = enc_params.preset;
@@ -555,7 +555,6 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
 
   filter_graph_internal::FilterGraphDescription fg_descr = {};
   fg_descr.filter_descr = params.filter_graph;
-  fg_descr.sws_flags = params.sws_flags;
   fg_descr.in.width = impl->enc_ctx->width;
   fg_descr.in.height = impl->enc_ctx->height;
   fg_descr.in.pix_fmt = AV_PIX_FMT_GBRPF32;

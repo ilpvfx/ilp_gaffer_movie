@@ -109,68 +109,72 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     /*name=*/"videoStreamIndex",
     /*direction=*/Plug::In,
     /*defaultValue=*/-1));
+  addChild(new StringPlug(// [3]
+    /*name=*/"filterGraph",
+    /*direction=*/Plug::In,
+    /*defaultValue=*/"vflip"));
 
   ValuePlugPtr startPlug = new ValuePlug(
     /*name=*/"start",
     /*direction=*/Plug::In);
-  startPlug->addChild(new IntPlug(// [3][0]
+  startPlug->addChild(new IntPlug(// [4][0]
     /*name=*/"mode",
     /*direction=*/Plug::In,
     /*defaultValue=*/static_cast<int>(FrameMaskMode::kNone),
     /*minValue=*/static_cast<int>(FrameMaskMode::kNone),
     /*maxValue=*/static_cast<int>(FrameMaskMode::kClampToFrame)));
-  startPlug->addChild(new IntPlug(// [3][1]
+  startPlug->addChild(new IntPlug(// [4][1]
     /*name=*/"frame",
     /*direction=*/Plug::In,
     /*defaultValue=*/0));
-  addChild(startPlug);// [3]
+  addChild(startPlug);// [4]
 
   ValuePlugPtr endPlug = new ValuePlug(
     /*name=*/"end",
     /*direction=*/Plug::In);
-  endPlug->addChild(new IntPlug(// [4][0]
+  endPlug->addChild(new IntPlug(// [5][0]
     /*name=*/"mode",
     /*direction=*/Plug::In,
     /*defaultValue=*/static_cast<int>(FrameMaskMode::kNone),
     /*minValue=*/static_cast<int>(FrameMaskMode::kNone),
     /*maxValue=*/static_cast<int>(FrameMaskMode::kClampToFrame)));
-  endPlug->addChild(new IntPlug(// [4][1]
+  endPlug->addChild(new IntPlug(// [5][1]
     /*name=*/"frame",
     /*direction=*/Plug::In,
     /*defaultValue=*/0));
-  addChild(endPlug);// [4]
+  addChild(endPlug);// [5]
 
-  addChild(new StringPlug(// [5]
+  addChild(new StringPlug(// [6]
     /*name=*/"colorSpace",
     /*direction=*/Plug::In));
 
-  addChild(new IntVectorDataPlug(// [6]
+  addChild(new IntVectorDataPlug(// [7]
     /*name=*/"availableFrames",
     /*direction=*/Plug::Out,
     /*defaultValue=*/new IECore::IntVectorData,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new BoolPlug(// [7]
+  addChild(new BoolPlug(// [8]
     /*name=*/"fileValid",
     /*direction=*/Plug::Out,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
 
-  addChild(new BoolPlug(// [8]
+  addChild(new BoolPlug(// [9]
     /*name=*/"__intermediateFileValid",
     /*direction=*/Plug::In,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new AtomicCompoundDataPlug(// [9]
+  addChild(new AtomicCompoundDataPlug(// [10]
     /*name=*/"__intermediateMetadata",
     /*direction=*/Plug::In,
     /*defaultValue=*/new IECore::CompoundData,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new StringPlug(// [10]
+  addChild(new StringPlug(// [11]
     /*name=*/"__intermediateColorSpace",
     /*direction=*/Plug::Out,
     /*defaultValue=*/"",
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new ImagePlug(// [11]
+  addChild(new ImagePlug(// [12]
     /*name=*/"__intermediateImage",
     /*direction=*/Plug::In,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
@@ -179,15 +183,16 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   // defer to internal nodes to do the hard work.
 
   AvReaderPtr avReader = new AvReader(/*name=*/"__avReader");
-  addChild(avReader);// [12]
+  addChild(avReader);// [13]
   avReader->fileNamePlug()->setInput(fileNamePlug());
   avReader->refreshCountPlug()->setInput(refreshCountPlug());
   avReader->videoStreamIndexPlug()->setInput(videoStreamIndexPlug());
+  avReader->filterGraphPlug()->setInput(filterGraphPlug());
   _intermediateMetadataPlug()->setInput(avReader->outPlug()->metadataPlug());
   _intermediateFileValidPlug()->setInput(avReader->fileValidPlug());
 
   ColorSpacePtr colorSpace = new ColorSpace(/*name=*/"__colorSpace");
-  addChild(colorSpace);// [13]
+  addChild(colorSpace);// [14]
   colorSpace->inPlug()->setInput(avReader->outPlug());
   colorSpace->inputSpacePlug()->setInput(_intermediateColorSpacePlug());
   colorSpace->processUnpremultipliedPlug()->setValue(true);
@@ -225,24 +230,25 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
 PLUG_MEMBER_IMPL(fileNamePlug, Gaffer::StringPlug, 0U);
 PLUG_MEMBER_IMPL(refreshCountPlug, Gaffer::IntPlug, 1U);
 PLUG_MEMBER_IMPL(videoStreamIndexPlug, Gaffer::IntPlug, 2U);
+PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 3U);
 
-PLUG_MEMBER_IMPL_SUB(startModePlug, Gaffer::IntPlug, 3U, 0U);
-PLUG_MEMBER_IMPL_SUB(startFramePlug, Gaffer::IntPlug, 3U, 1U);
-PLUG_MEMBER_IMPL_SUB(endModePlug, Gaffer::IntPlug, 4U, 0U);
-PLUG_MEMBER_IMPL_SUB(endFramePlug, Gaffer::IntPlug, 4U, 1U);
+PLUG_MEMBER_IMPL_SUB(startModePlug, Gaffer::IntPlug, 4U, 0U);
+PLUG_MEMBER_IMPL_SUB(startFramePlug, Gaffer::IntPlug, 4U, 1U);
+PLUG_MEMBER_IMPL_SUB(endModePlug, Gaffer::IntPlug, 5U, 0U);
+PLUG_MEMBER_IMPL_SUB(endFramePlug, Gaffer::IntPlug, 5U, 1U);
 
-PLUG_MEMBER_IMPL(colorSpacePlug, Gaffer::StringPlug, 5U);
-PLUG_MEMBER_IMPL(availableFramesPlug, Gaffer::IntVectorDataPlug, 6U);
-PLUG_MEMBER_IMPL(fileValidPlug, Gaffer::BoolPlug, 7U);
+PLUG_MEMBER_IMPL(colorSpacePlug, Gaffer::StringPlug, 6U);
+PLUG_MEMBER_IMPL(availableFramesPlug, Gaffer::IntVectorDataPlug, 7U);
+PLUG_MEMBER_IMPL(fileValidPlug, Gaffer::BoolPlug, 8U);
 
-PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 8U);
-PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 9U);
-PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 10U);
-PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 11U);
+PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 9U);
+PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 10U);
+PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 11U);
+PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 12U);
 
-// Not really plugs, but follow the same pattern.
-PLUG_MEMBER_IMPL(_avReader, AvReader, 12U);
-PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 13U);
+// Not really plugs, but follow the same pattern (they are also children).
+PLUG_MEMBER_IMPL(_avReader, AvReader, 13U);
+PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 14U);
 
 #undef PLUG_MEMBER_IMPL
 #undef PLUG_MEMBER_IMPL_SUB

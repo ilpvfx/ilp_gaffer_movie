@@ -3,6 +3,7 @@
 #include <cassert>// assert
 #include <cstring>// std::memcpy
 #include <map>// std::map
+#include <sstream>// std::istringstream
 
 #include <ilp_movie/pixel_data.hpp>
 #include <internal/filter_graph.hpp>
@@ -79,14 +80,14 @@ public:
 
     if (thread_count > 0) {
 #if 1// NOTE(tohi): experimental, not tested.
-        if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
-          _av_codec_ctx->thread_count = thread_count;
-          _av_codec_ctx->thread_type = FF_THREAD_SLICE;// NOLINT
-        }
-        if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
-          _av_codec_ctx->thread_count = thread_count;
-          _av_codec_ctx->thread_type |= FF_THREAD_FRAME;// NOLINT
-        }
+      if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {// NOLINT
+        _av_codec_ctx->thread_count = thread_count;
+        _av_codec_ctx->thread_type = FF_THREAD_SLICE;// NOLINT
+      }
+      if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {// NOLINT
+        _av_codec_ctx->thread_count = thread_count;
+        _av_codec_ctx->thread_type |= FF_THREAD_FRAME;// NOLINT
+      }
 #endif
     }
 
@@ -245,6 +246,55 @@ namespace ilp_movie {
 class DecoderImpl
 {
 public:
+  [[nodiscard]] static auto SupportedFormats() -> std::vector<std::string>
+  {
+#if 1
+    // A hard-coded list of extensions, since it turns out to be tricky
+    // to get a "good" list from libav.
+    static std::vector<std::string> fmt_names = { "mov", "mp4" };
+#else
+    // NOTE(tohi): The approach below doesn't work, it seems that most
+    //             formats don't define codec_tag.
+    static std::vector<std::string> fmt_names;
+    if (fmt_names.empty()) {
+      // Enumerate all video decoders.
+      std::vector<const AVCodec *> video_decoders;
+      void *codec_it = nullptr;
+      const AVCodec *codec = av_codec_iterate(&codec_it);
+      while (codec != nullptr) {
+        const AVCodec *decoder = avcodec_find_decoder(codec->id);
+        if (decoder != nullptr && decoder->type == AVMEDIA_TYPE_VIDEO) {
+          video_decoders.push_back(decoder);
+        }
+        codec = av_codec_iterate(&codec_it);
+      }
+
+      void *demux_it = nullptr;
+      const AVInputFormat *ifmt = nullptr;
+      while ((ifmt = av_demuxer_iterate(&demux_it))) {// NOLINT
+        if (ifmt->name != nullptr) {
+          bool video_decoder_found = false;
+          for (const AVCodec *video_decoder : video_decoders) {
+            unsigned int tag = 0U;
+            if (av_codec_get_tag2(ifmt->codec_tag, video_decoder->id, &tag) > 0) {
+              video_decoder_found = true;
+              break;
+            }
+          }
+
+          if (video_decoder_found) {
+            std::istringstream iss{ ifmt->name };
+            std::string token;
+            while (std::getline(iss, token, ',')) { fmt_names.push_back(token); }
+          }
+        }
+      }
+    }
+#endif
+    return fmt_names;
+  }
+
+
   DecoderImpl() = default;
   ~DecoderImpl() { Close(); }
 
@@ -255,44 +305,17 @@ public:
   DecoderImpl(const DecoderImpl &rhs) = delete;
   DecoderImpl &operator=(const DecoderImpl &rhs) = delete;
 
-  [[nodiscard]] auto Open(std::string url) noexcept -> bool
+  [[nodiscard]] auto Open(const std::string &url,
+    const DecoderFilterGraphDescription &dfgd) noexcept -> bool
   {
     const auto exit_func = [&](const bool success) {
       if (!success) { Close(); }
       return success;
     };
 
-#if 0 // TMP!!
-    // enumerate all codecs and put into list
-    std::vector<const AVCodec*> video_codecs;
-    {
-      const AVCodec * codec = nullptr;
-      void* opaque = nullptr;
-      while ((codec = av_codec_iterate(&opaque))) {
-        if (codec->type == AVMEDIA_TYPE_VIDEO) {
-          video_codecs.push_back(codec);
-        }
-      }
-    }
-
-    // enumerate all containers
-    const AVInputFormat *ifmt = nullptr;
-    void* opaque = nullptr;
-    while ((ifmt = av_demuxer_iterate(&opaque))) {//NOLINT
-      ifmt->codec_tag
-      if ()
-      // for (auto codec : encoderList) {
-      //   // only add the codec if it can be used with this container
-      //   if (avformat_query_codec(outputFormat, codec->id, FF_COMPLIANCE_STRICT) == 1) {
-      //     // add codec for container
-      //   }
-      // }
-    }
-#endif
-
     Close();
 
-    _url = std::move(url);
+    _url = url;
     assert(_av_fmt_ctx == nullptr);// NOLINT
     if (const int ret =
           avformat_open_input(&_av_fmt_ctx, _url.c_str(), /*fmt=*/nullptr, /*options=*/nullptr);
@@ -330,25 +353,61 @@ public:
         auto video_stream = std::make_unique<Stream>();
         const int stream_index = _av_fmt_ctx->streams[i]->index;// NOLINT
         if (!video_stream->Open(_av_fmt_ctx, stream_index, kThreadCount)) {
-          ilp_movie::LogMsg(ilp_movie::LogLevel::kError, "Failed opening video stream\n");
+          LogMsg(LogLevel::kError, "Failed opening video stream\n");
           return exit_func(/*success=*/false);
         }
 
         av_dump_format(_av_fmt_ctx, stream_index, _url.c_str(), /*is_output=*/0);
 
+        // Create filter graph for video stream.
+        // Each video stream requires its own filter graph instance since the inputs
+        // configuerd from the codec/stream parameters.
+        const AVPixelFormat out_pix_fmt = av_get_pix_fmt(dfgd.out_pix_fmt_name.c_str());
+        if (out_pix_fmt == AV_PIX_FMT_NONE) {
+          LogMsg(LogLevel::kError, "Unrecognized filter graph output pixel format\n");
+          return exit_func(/*success=*/false);
+        }
+
         filter_graph_internal::FilterGraphDescription fg_descr{};
+        fg_descr.filter_descr = dfgd.filter_descr;
         fg_descr.in.width = video_stream->CodecContext()->width;
         fg_descr.in.height = video_stream->CodecContext()->height;
         fg_descr.in.pix_fmt = video_stream->CodecContext()->pix_fmt;
         fg_descr.in.sample_aspect_ratio = video_stream->CodecContext()->sample_aspect_ratio;
         fg_descr.in.time_base = video_stream->Get()->time_base;
-        fg_descr.out.pix_fmt = AV_PIX_FMT_GBRPF32;
+        fg_descr.out.pix_fmt = out_pix_fmt;
         auto fg = std::make_unique<filter_graph_internal::FilterGraph>();
         if (!fg->SetDescription(fg_descr)) {
-          ilp_movie::LogMsg(
-            ilp_movie::LogLevel::kError, "Failed constructing default filter graph\n");
+          LogMsg(LogLevel::kError, "Failed constructing default filter graph\n");
           return exit_func(/*success=*/false);
         }
+
+        // Populate video stream header information.
+        // clang-format off
+        InputVideoStreamHeader ivsh{};
+        ivsh.stream_index = video_stream->Get()->index;
+        ivsh.is_best = (ivsh.stream_index == _best_video_stream);
+        ivsh.width = video_stream->CodecContext()->width;
+        ivsh.height = video_stream->CodecContext()->height;
+        ivsh.frame_rate = { 
+          /*.num=*/video_stream->FrameRate().num,
+          /*.den=*/video_stream->FrameRate().den };
+        ivsh.pixel_aspect_ratio = { 
+          /*.num=*/video_stream->CodecContext()->sample_aspect_ratio.num,
+          /*.den=*/video_stream->CodecContext()->sample_aspect_ratio.den };
+        ivsh.first_frame_nb = 1;// Good??
+        ivsh.frame_count = video_stream->FrameCount();
+        ivsh.pix_fmt_name = 
+          av_get_pix_fmt_name(video_stream->CodecContext()->pix_fmt);
+        ivsh.color_range_name = 
+          av_color_range_name(video_stream->CodecContext()->color_range);
+        ivsh.color_space_name = 
+          av_color_space_name(video_stream->CodecContext()->colorspace);
+        ivsh.color_primaries_name =
+          av_color_primaries_name(video_stream->CodecContext()->color_primaries);
+        _video_stream_headers.push_back(ivsh);
+        // clang-format on
+
         _video_streams[stream_index] = { std::move(video_stream), std::move(fg) };
       }
     }
@@ -365,9 +424,7 @@ public:
 
   [[nodiscard]] auto IsOpen() const noexcept -> bool { return !_url.empty(); }
 
-  [[nodiscard]] auto Url() const noexcept -> std::string {
-    return _url;
-  }
+  [[nodiscard]] auto Url() const noexcept -> const std::string & { return _url; }
 
   void Close()
   {
@@ -382,63 +439,15 @@ public:
       assert(_av_packet == nullptr);// NOLINT
     }
     _best_video_stream = -1;
+    _video_stream_headers.clear();
     _video_streams.clear();
   }
 
-  [[nodiscard]] auto VideoStreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>
+  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> int { return _best_video_stream; }
+
+  [[nodiscard]] auto VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
   {
-    std::vector<DecodeVideoStreamInfo> r;
-    r.reserve(_video_streams.size());
-    for (auto &&[stream_index, fs] : _video_streams) {
-      // clang-format off
-      assert(stream_index == fs.stream->Get()->index);// NOLINT
-      DecodeVideoStreamInfo dvsi{};
-      dvsi.stream_index = fs.stream->Get()->index;
-      dvsi.is_best = (dvsi.stream_index == _best_video_stream);
-      dvsi.width = fs.stream->CodecContext()->width;
-      dvsi.height = fs.stream->CodecContext()->height;
-      dvsi.frame_rate = { /*.num=*/fs.stream->FrameRate().num, /*.den=*/fs.stream->FrameRate().den };
-      dvsi.first_frame_nb = 1;// Good??
-      dvsi.frame_count = fs.stream->FrameCount();
-      dvsi.pix_fmt_name = av_get_pix_fmt_name(fs.stream->CodecContext()->pix_fmt);
-      dvsi.color_range_name = av_color_range_name(fs.stream->CodecContext()->color_range);
-      dvsi.color_space_name = av_color_space_name(fs.stream->CodecContext()->colorspace);
-      dvsi.color_primaries_name =
-        av_color_primaries_name(fs.stream->CodecContext()->color_primaries);
-      // clang-format off
-      r.push_back(dvsi);
-    }
-    return r;
-  }
-
-
-  [[nodiscard]] auto SetFilterGraph(int stream_index,
-    std::string filter_descr,
-    std::string sws_flags) noexcept -> bool 
-  {
-    const auto fs_iter = _video_streams.find(stream_index);
-    if (fs_iter == _video_streams.end()) {
-      ilp_movie::LogMsg(ilp_movie::LogLevel::kWarning, "Bad stream index for filter graph\n");
-      return false;
-    }
-    Stream *stream = fs_iter->second.stream.get();
-
-    filter_graph_internal::FilterGraphDescription fg_descr{};
-    fg_descr.filter_descr = std::move(filter_descr);
-    fg_descr.sws_flags = std::move(sws_flags);
-    fg_descr.in.width = stream->CodecContext()->width;
-    fg_descr.in.height = stream->CodecContext()->height;
-    fg_descr.in.pix_fmt = stream->CodecContext()->pix_fmt;
-    fg_descr.in.sample_aspect_ratio = stream->CodecContext()->sample_aspect_ratio;
-    fg_descr.in.time_base = stream->Get()->time_base;
-    fg_descr.out.pix_fmt = AV_PIX_FMT_GBRPF32;// TODO(tohi): is this always good?
-    auto fg = std::make_unique<filter_graph_internal::FilterGraph>();
-    if (!fg->SetDescription(fg_descr)) {
-      LogMsg(LogLevel::kWarning, "Failed constructing filter graph\n");
-      return false;
-    }
-    fs_iter->second.filter_graph = std::move(fg);
-    return true;
+    return _video_stream_headers;
   }
 
   [[nodiscard]] auto
@@ -490,7 +499,8 @@ public:
           // TODO(tohi): Can we seek based on frame PTS? Check frame PTS before sending to filter
           // graph?
           bool keep_going_dec = true;
-          if (dec_frame->pts <= timestamp && timestamp < (dec_frame->pts + dec_frame->pkt_duration)) {
+          if (dec_frame->pts <= timestamp
+              && timestamp < (dec_frame->pts + dec_frame->pkt_duration)) {
             keep_going_dec = filter_graph->FilterFrames(dec_frame, [&](AVFrame *filt_frame) {
               // Check if the frame has a PTS/duration that matches our seek target.
               bool keep_going_filt = true;
@@ -555,7 +565,7 @@ public:
           }
           return keep_going_dec;
         });
-      }
+    }
     return got_frame;
 
     // _av_frame->crop_top
@@ -572,6 +582,7 @@ private:
   AVPacket *_av_packet = nullptr;
 
   int _best_video_stream = -1;
+  std::vector<InputVideoStreamHeader> _video_stream_headers;
 
   struct FilteredStream
   {
@@ -580,33 +591,38 @@ private:
   };
 
   std::map<int, FilteredStream> _video_streams;
-};
+};// namespace ilp_movie
 
 // -----------
+
+auto Decoder::SupportedFormats() -> std::vector<std::string>
+{
+  return DecoderImpl::SupportedFormats();
+}
 
 Decoder::Decoder() : _pimpl{ std::make_unique<DecoderImpl>() } {}
 Decoder::~Decoder() = default;
 
-auto Decoder::Open(std::string url) noexcept -> bool { return Pimpl()->Open(std::move(url)); }
+auto Decoder::Open(const std::string &url, const DecoderFilterGraphDescription &dfgd) noexcept
+  -> bool
+{
+  return Pimpl()->Open(url, dfgd);
+}
 
 auto Decoder::IsOpen() const noexcept -> bool { return Pimpl()->IsOpen(); }
 
-auto Decoder::Url() const noexcept -> std::string {
-  return Pimpl()->Url();
-}
+auto Decoder::Url() const noexcept -> const std::string & { return Pimpl()->Url(); }
 
 void Decoder::Close() noexcept { Pimpl()->Close(); }
 
-auto Decoder::VideoStreamInfo() const noexcept -> std::vector<DecodeVideoStreamInfo>
+auto Decoder::BestVideoStreamIndex() const noexcept -> int
 {
-  return Pimpl()->VideoStreamInfo();
+  return Pimpl()->BestVideoStreamIndex();
 }
 
-auto Decoder::SetFilterGraph(const int stream_index,
-  std::string filter_descr,
-  std::string sws_flags) noexcept -> bool
+auto Decoder::VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
 {
-  return Pimpl()->SetFilterGraph(stream_index, std::move(filter_descr), std::move(sws_flags));
+  return Pimpl()->VideoStreamHeaders();
 }
 
 auto Decoder::DecodeVideoFrame(const int stream_index,

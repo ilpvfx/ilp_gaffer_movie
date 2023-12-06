@@ -32,9 +32,8 @@ Gaffer.Metadata.registerNode(
 
 			"plugValueWidget:type", "GafferUI.FileSystemPathPlugValueWidget",
 			"path:leaf", True,
+			#TODO(tohi): "path:bookmarks", "video", ???
 			#"path:bookmarks", "image",
-			#
-			#TODO(tohi): "path:bookmarks", "video",
 			"fileSystemPath:extensions", " ".join( IlpGafferMovie.MovieReader.supportedExtensions() ),
 			"fileSystemPath:extensionsLabel", "Show only video files",
 			"fileSystemPath:includeSequences", False,
@@ -72,6 +71,17 @@ Gaffer.Metadata.registerNode(
 			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
 			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
 
+		],
+
+		"filterGraph" : [
+
+			"description",
+			"""
+			The filter graph applied to the decoded frames.\n
+			FFmpeg command-line equivalent of '-vf'.
+			""",
+
+			"label", "Filter Graph",
 		],
 
 		"start" : [
@@ -264,28 +274,11 @@ class _ColorSpacePlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 			return [ node["__intermediateColorSpace"] ]
 
 
-class _AvailableFramesPlugValueWidget( GafferUI.PlugValueWidget ) :
+class _VideoStreamIndexPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 
 	def __init__( self, plug, **kw ) :
 
-		self.__textWidget = GafferUI.TextWidget( editable = False )
-		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
-
-	def _updateFromValues( self, values, exception ) :
-
-		value = sole( values )
-		if value is None :
-			self.__textWidget.setText( "---" )
-		else :
-			self.__textWidget.setText( str( IECore.frameListFromList( list( value ) ) ) )
-
-		self.__textWidget.setErrored( exception is not None )
-
-class _VideoStreamPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
-
-	def __init__( self, plug, **kw ) :
-
-		self.__textWidget = GafferUI.TextWidget( editable = False )
+		# self.__textWidget = GafferUI.TextWidget( editable = False )
 		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
 
 	@staticmethod
@@ -321,5 +314,22 @@ class _VideoStreamPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 		if isinstance( node, IlpGafferMovie.MovieReader ) :
 			return [ node["__avReader"] ]
 
+
+class _AvailableFramesPlugValueWidget( GafferUI.PlugValueWidget ) :
+
+	def __init__( self, plug, **kw ) :
+
+		self.__textWidget = GafferUI.TextWidget( editable = False )
+		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
+
+	def _updateFromValues( self, values, exception ) :
+
+		value = sole( values )
+		if value is None :
+			self.__textWidget.setText( "---" )
+		else :
+			self.__textWidget.setText( str( IECore.frameListFromList( list( value ) ) ) )
+
+		self.__textWidget.setErrored( exception is not None )
 
 # fmt: on

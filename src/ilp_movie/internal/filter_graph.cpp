@@ -176,8 +176,6 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    if (!descr.sws_flags.empty()) { _graph->scale_sws_opts = av_strdup(descr.sws_flags.c_str()); }
-
     _filt_frame = av_frame_alloc();
     if (_filt_frame == nullptr) {
       log_utils_internal::LogAvError("Cannot allocate filter frame", AVERROR(ENOMEM));

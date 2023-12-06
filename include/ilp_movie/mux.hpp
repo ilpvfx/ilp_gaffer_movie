@@ -232,7 +232,6 @@ struct MuxParameters
   std::string colorspace;
   std::string color_trc;
 
-  std::string sws_flags;
   std::string filter_graph;
 
   // ===============

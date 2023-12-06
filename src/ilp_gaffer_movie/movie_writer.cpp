@@ -43,10 +43,9 @@ MovieWriter::MovieWriter(const std::string &name) : TaskNode(name)
   addChild(new StringPlug("colorspace", Plug::In, "bt709"));
   addChild(new StringPlug("colorPrimaries", Plug::In, "bt709"));
   addChild(new StringPlug("colorTrc", Plug::In, "iec61966-2-1"));
-  addChild(new StringPlug("swsFlags", Plug::In, 
-    "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"));
   addChild(new StringPlug("filtergraph", Plug::In,
-    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"));
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"
+    ":flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"));
   addChild(new StringPlug("codec", Plug::In, "prores"));
 
   constexpr auto plug_default = static_cast<unsigned int>(Plug::Default);
@@ -159,33 +158,27 @@ const Gaffer::StringPlug *MovieWriter::colorTrcPlug() const
   return getChild<StringPlug>(FirstPlugIndex + 5);
 }
 
-Gaffer::StringPlug *MovieWriter::swsFlagsPlug() { return getChild<StringPlug>(FirstPlugIndex + 6); }
-const Gaffer::StringPlug *MovieWriter::swsFlagsPlug() const
+Gaffer::StringPlug *MovieWriter::filtergraphPlug()
+{
+  return getChild<StringPlug>(FirstPlugIndex + 6);
+}
+const Gaffer::StringPlug *MovieWriter::filtergraphPlug() const
 {
   return getChild<StringPlug>(FirstPlugIndex + 6);
 }
 
-Gaffer::StringPlug *MovieWriter::filtergraphPlug()
-{
-  return getChild<StringPlug>(FirstPlugIndex + 7);
-}
-const Gaffer::StringPlug *MovieWriter::filtergraphPlug() const
-{
-  return getChild<StringPlug>(FirstPlugIndex + 7);
-}
-
-Gaffer::StringPlug *MovieWriter::codecPlug() { return getChild<StringPlug>(FirstPlugIndex + 8); }
+Gaffer::StringPlug *MovieWriter::codecPlug() { return getChild<StringPlug>(FirstPlugIndex + 7); }
 
 const Gaffer::StringPlug *MovieWriter::codecPlug() const
 {
-  return getChild<StringPlug>(FirstPlugIndex + 8);
+  return getChild<StringPlug>(FirstPlugIndex + 7);
 }
 
-GafferImage::ImagePlug *MovieWriter::outPlug() { return getChild<ImagePlug>(FirstPlugIndex + 9); }
+GafferImage::ImagePlug *MovieWriter::outPlug() { return getChild<ImagePlug>(FirstPlugIndex + 8); }
 
 const GafferImage::ImagePlug *MovieWriter::outPlug() const
 {
-  return getChild<ImagePlug>(FirstPlugIndex + 9);
+  return getChild<ImagePlug>(FirstPlugIndex + 8);
 }
 
 Gaffer::ValuePlug *MovieWriter::codecSettingsPlug(const std::string &codec_name)
@@ -309,7 +302,6 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
       throw IECore::Exception("Unsupported codec");
     }
 
-    mux_params.sws_flags = swsFlagsPlug()->getValue();
     mux_params.filter_graph = filtergraphPlug()->getValue();
 
     return ilp_movie::MakeMuxContext(mux_params);

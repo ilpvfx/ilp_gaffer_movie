@@ -12,10 +12,6 @@
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
 
-namespace ilp_movie {
-class Decoder;
-}// namespace ilp_movie
-
 namespace Gaffer {
 IE_CORE_FORWARDDECLARE(StringPlug)
 }// namespace Gaffer
@@ -43,6 +39,7 @@ public:
   PLUG_MEMBER_DECL(refreshCountPlug, Gaffer::IntPlug);
 
   PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
+  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
   PLUG_MEMBER_DECL(availableVideoStreamInfoPlug, Gaffer::StringVectorDataPlug);
   PLUG_MEMBER_DECL(availableVideoStreamIndicesPlug, Gaffer::IntVectorDataPlug);
@@ -114,6 +111,8 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
+  std::shared_ptr<void> _retrieveDecoder(const Gaffer::Context *context) const;
+
   std::shared_ptr<void> _retrieveFrame(
     const Gaffer::Context *context /*, bool holdForBlack = false*/) const;
 
@@ -124,9 +123,6 @@ private:
   void _plugSet(Gaffer::Plug *plug);
 
   static size_t FirstPlugIndex;
-
-  std::unique_ptr<ilp_movie::Decoder> _decoder;
-  int _video_stream_index = -1;
 };
 
 #undef PLUG_MEMBER_DECL

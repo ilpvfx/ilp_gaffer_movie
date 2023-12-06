@@ -21,7 +21,6 @@ namespace filter_graph_internal {
 struct FilterGraphDescription
 {
   std::string filter_descr = "null";// Pass-through (for video), use "anull" for audio.
-  std::string sws_flags = "";
 
   struct
   {
