@@ -76,7 +76,7 @@ std::size_t hash_value(const FrameCacheKey &k)
 #else 
   std::size_t seed = 0U;
   boost::hash_combine(seed, k.frame_nb);// NOLINT
-  return 42U;
+  return seed;
 #endif
 }
 
