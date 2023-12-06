@@ -753,7 +753,6 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 
   GafferImage::ImagePlug::GlobalScope c(context);
   auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
-
   if (frame == nullptr) { return parent->channelDataPlug()->defaultValue(); }
 
   const Imath::Box2i dataWindow = outPlug()->dataWindowPlug()->getValue();
@@ -911,11 +910,17 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
 #endif
+  const auto *p = videoStreamIndexPlug();
+  if (p == nullptr) { return nullptr; }
+  if (context == nullptr) { return nullptr; }
+  auto *fc = frameCache();
+  if (fc == nullptr) { return nullptr; }
+
   FrameCacheKey key{};
   key.decoder = nullptr;//decoder.get();
-  key.video_stream_index = videoStreamIndexPlug()->getValue();
+  key.video_stream_index = p->getValue();
   key.frame_nb = static_cast<int>(context->getFrame());
-  FrameCacheEntry frameEntry = frameCache()->get(key);
+  FrameCacheEntry frameEntry = fc->get(key);
   return nullptr;
 
 #if 0
