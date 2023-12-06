@@ -83,7 +83,7 @@ std::size_t hash_value(const FrameCacheKey &k)
 FrameCacheEntry
   frameCacheGetter(const FrameCacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
 {
-  IlpGafferMovie::TRACE("AvReader", "FrameCacheGetter");
+  IlpGafferMovie::TRACE("AvReader", "frameCacheGetter");
 
   cost = 1U;
 
@@ -885,6 +885,7 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   bool holdForBlack = false*/) const
 {
+#if 0
   TRACE("AvReader",
     (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
@@ -909,6 +910,13 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
   TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
+#endif
+  FrameCacheKey key{};
+  key.decoder = nullptr;//decoder.get();
+  key.video_stream_index = videoStreamIndexPlug()->getValue();
+  key.frame_nb = static_cast<int>(context->getFrame());
+  FrameCacheEntry frameEntry = frameCache()->get(key);
+  return nullptr;
 
 #if 0
   MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
