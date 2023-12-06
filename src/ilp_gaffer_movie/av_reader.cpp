@@ -21,7 +21,13 @@
 #include <Gaffer/Context.h>
 #include <Gaffer/StringPlug.h>
 
+namespace {
+struct FrameCacheKey;
+inline std::size_t hash_value(const FrameCacheKey &k);
+}// namespace
+
 #include <boost/bind/bind.hpp>
+#include <boost/functional/hash.hpp>
 
 #include <ilp_movie/decoder.hpp>
 #include <ilp_movie/log.hpp>
@@ -50,14 +56,18 @@ struct FrameCacheKey
 
 constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
 {
-  return lhs.decoder == rhs.decoder && lhs.video_stream_index == rhs.video_stream_index
-         && lhs.frame_nb == rhs.frame_nb;
+  // clang-format off
+  return 
+    lhs.decoder == rhs.decoder && 
+    lhs.video_stream_index == rhs.video_stream_index && 
+    lhs.frame_nb == rhs.frame_nb;
+  // clang-format on
 }
 
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0U;
-  boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
+  //boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
@@ -875,19 +885,6 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
     if (video_stream_index < 0) { return nullptr; }
   }
 
-#if 0
-  MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
-  if (holdForBlack && mode == Black) {
-    // For some outputs, like "format", we need to hold the value of an adjacent frame when we're
-    // going to return black pixels
-    mode = Hold;
-  }
-  ImageReader::ChannelInterpretation channelNaming =
-    (ImageReader::ChannelInterpretation)channelInterpretationPlug()->getValue();
-
-  const std::string resolvedFileName = context->substitute(fileName);
-#endif
-
   FrameCacheKey key{};
   key.decoder = decoder.get();
   key.video_stream_index = video_stream_index;
@@ -900,6 +897,19 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
   TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
+
+#if 0
+  MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
+  if (holdForBlack && mode == Black) {
+    // For some outputs, like "format", we need to hold the value of an adjacent frame when we're
+    // going to return black pixels
+    mode = Hold;
+  }
+  ImageReader::ChannelInterpretation channelNaming =
+    (ImageReader::ChannelInterpretation)channelInterpretationPlug()->getValue();
+
+  const std::string resolvedFileName = context->substitute(fileName);
+#endif
 
 #if 0
   if (!cacheEntry.frame) {
