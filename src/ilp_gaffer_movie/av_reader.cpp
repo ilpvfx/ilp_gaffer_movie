@@ -57,9 +57,9 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0;
-  boost::hash_combine(seed, k.decoder);
-  boost::hash_combine(seed, k.video_stream_index);
-  boost::hash_combine(seed, k.frame_nb);
+  boost::hash_combine(seed, k.decoder);// NOLINT
+  boost::hash_combine(seed, k.video_stream_index);// NOLINT
+  boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
 }
 
