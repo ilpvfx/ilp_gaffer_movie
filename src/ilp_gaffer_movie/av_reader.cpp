@@ -322,7 +322,7 @@ void AvReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context
       assert(dvsi.frame_count >= 0);// NOLINT
       IntVectorDataPtr resultData = new IntVectorData;
       auto &result = resultData->writable();
-      result.resize(static_cast<size_t>(video_stream_headers[0].frame_count));
+      result.resize(static_cast<size_t>(dvsi.frame_count));
       const int start_value = 1;// TODO(tohi): Could be different?
       std::iota(std::begin(result), std::end(result), start_value);
       static_cast<IntVectorDataPlug *>(output)->setValue(resultData);// NOLINT
@@ -860,7 +860,6 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
 
   return decoderEntry.decoder;
 }
-
 
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   bool holdForBlack = false*/) const
