@@ -67,7 +67,7 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0U;
-  //boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
+  // boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
   boost::hash_combine(seed, k.decoder);// NOLINT
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
@@ -75,7 +75,7 @@ std::size_t hash_value(const FrameCacheKey &k)
 }
 
 FrameCacheEntry
-  FrameCacheGetter(const FrameCacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
+  frameCacheGetter(const FrameCacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
 {
   IlpGafferMovie::TRACE("AvReader", "FrameCacheGetter");
 
@@ -83,8 +83,13 @@ FrameCacheEntry
 
   FrameCacheEntry result = {};
 
-  if (key.decoder == nullptr || !key.decoder->IsOpen()) {
+  if (key.decoder == nullptr) {
     result.error = std::make_shared<std::string>("AvReader : Bad decoder");
+    return result;
+  }
+
+  if (!key.decoder->IsOpen()) {
+    result.error = std::make_shared<std::string>("AvReader : Decoder not open");
     return result;
   }
 
@@ -106,7 +111,7 @@ using FrameCache = IECorePreview::LRUCache<FrameCacheKey, FrameCacheEntry>;
 
 FrameCache *frameCache()
 {
-  static auto *c = new FrameCache(FrameCacheGetter, /*maxCost=*/200);
+  static auto *c = new FrameCache(frameCacheGetter, /*maxCost=*/200);
   return c;
 }
 
@@ -893,8 +898,7 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   key.frame_nb = static_cast<int>(context->getFrame());
   FrameCacheEntry frameEntry = frameCache()->get(key);
   if (frameEntry.frame == nullptr) {
-    assert(frameEntry.error != nullptr);// NOLINT
-    throw IECore::Exception(*(frameEntry.error));
+    throw IECore::Exception(frameEntry.error != nullptr ? frameEntry.error->c_str() : "");
   }
 
   TRACE("AvReader", "_retrieveFrame: return frame");
