@@ -64,14 +64,18 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
   // clang-format on
 }
 
-std::size_t hash_value(const FrameCacheKey &k)
+std::size_t hash_value(const FrameCacheKey &/*k*/)
 {
+#if 0
   std::size_t seed = 0U;
   // boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
   boost::hash_combine(seed, k.decoder);// NOLINT
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
+#else 
+  return 42U;
+#endif
 }
 
 FrameCacheEntry
