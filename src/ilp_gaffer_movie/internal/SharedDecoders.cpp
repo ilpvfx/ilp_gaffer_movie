@@ -33,11 +33,10 @@ std::size_t hash_value(const DecoderKey &k)
   return seed;
 }
 
-
 using DecoderEntry = IlpGafferMovie::shared_decoders_internal::DecoderEntry;
 
 DecoderEntry
-  fileCacheGetter(const DecoderKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
+  decoderCacheGetter(const DecoderKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
 {
   // Each decoder costs exactly one unit.
   cost = 1U;
@@ -63,7 +62,7 @@ using DecoderLRUCache = IECorePreview::LRUCache<DecoderKey, DecoderEntry>;
 DecoderLRUCache &cache()
 {
   // TODO(tohi): Do we really need to dynamically allocate the cache??
-  static DecoderLRUCache *cache = new DecoderLRUCache(fileCacheGetter, /*maxCost=*/200);// NOLINT
+  static DecoderLRUCache *cache = new DecoderLRUCache(decoderCacheGetter, /*maxCost=*/200);// NOLINT
   return *cache;
 }
 

@@ -56,13 +56,12 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
 
 std::size_t hash_value(const FrameCacheKey &k)
 {
-  std::size_t seed = 0;
-  boost::hash_combine(seed, k.decoder);// NOLINT
+  std::size_t seed = 0U;
+  boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
 }
-
 
 FrameCacheEntry
   FrameCacheGetter(const FrameCacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
@@ -854,8 +853,8 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
   const std::string filterGraph = filterGraphPlug()->getValue();
   static const std::string kOutPixFmt = "gbrpf32le";
 
-  auto decoderEntry = shared_decoders_internal::SharedDecoders::get(
-    fileName, filterGraph, kOutPixFmt);
+  auto decoderEntry =
+    shared_decoders_internal::SharedDecoders::get(fileName, filterGraph, kOutPixFmt);
   if (decoderEntry.decoder == nullptr) { throw IECore::Exception(*(decoderEntry.error)); }
 
   return decoderEntry.decoder;
