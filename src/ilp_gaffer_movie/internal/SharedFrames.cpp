@@ -1,8 +1,11 @@
 #include "internal/SharedFrames.h"
 
+#include <cassert>// assert
+
 #include <boost/functional/hash.hpp>// boost::hash_combine
 
 #include "internal/LRUCache.h"// IECorePreview::LRUCache
+#include "internal/SharedDecoders.h"
 
 namespace {
 
@@ -15,9 +18,40 @@ FrameLRUCache &cache()
   static FrameLRUCache cache{
     [](const CacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/) {
       cost = 1U;
-
       CacheEntry result = {};
 
+      const auto decoderEntry =
+        IlpGafferMovie::shared_decoders_internal::SharedDecoders::get(key.decoder_key);
+      if (decoderEntry.decoder == nullptr) {
+        result.error = std::make_shared<std::string>("Bad decoder");
+        return result;
+      }
+      assert(decoderEntry.decoder->IsOpen());// NOLINT
+
+      int video_stream_index = key.video_stream_index;
+      if (video_stream_index < 0) {
+        video_stream_index = decoderEntry.decoder->BestVideoStreamIndex();
+        if (video_stream_index < 0) { 
+          result.error = std::make_shared<std::string>("Bad video stream index");
+          return result; 
+        }
+      }
+
+      try {
+        auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
+        if (!decoderEntry.decoder->DecodeVideoFrame(
+              key.video_stream_index, key.frame_nb, /*out*/ *dvf)) {
+          result.error = std::make_shared<std::string>("Cannot seek to frame");
+          return result;
+        }
+        result.frame.reset(dvf.release());// NOLINT
+      } catch (std::exception &) {
+        result.error = std::make_shared<std::string>("Cannot initialize decoder");
+        return result;
+      }
+      return result;
+
+#if 0
       if (key.decoder == nullptr) {
         result.error = std::make_shared<std::string>("Bad decoder");
         return result;
@@ -40,6 +74,7 @@ FrameLRUCache &cache()
         return result;
       }
       return result;
+#endif
     },
     /*maxCost=*/200
   };
@@ -50,11 +85,14 @@ FrameLRUCache &cache()
 
 namespace IlpGafferMovie::shared_frames_internal {
 
-constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
+bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
 {
   // clang-format off
   return 
-    lhs.decoder == rhs.decoder && 
+    //lhs.decoder == rhs.decoder && 
+    lhs.decoder_key.fileName == rhs.decoder_key.fileName && 
+    lhs.decoder_key.filterGraphDescr.filter_descr == rhs.decoder_key.filterGraphDescr.filter_descr && 
+    lhs.decoder_key.filterGraphDescr.out_pix_fmt_name == rhs.decoder_key.filterGraphDescr.out_pix_fmt_name &&
     lhs.video_stream_index == rhs.video_stream_index && 
     lhs.frame_nb == rhs.frame_nb;
   // clang-format on
@@ -63,9 +101,12 @@ constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) no
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0;
-  boost::hash_combine(seed, k.decoder);// NOLINT
-  boost::hash_combine(seed, k.video_stream_index);// NOLINT
-  boost::hash_combine(seed, k.frame_nb);// NOLINT
+  // boost::hash_combine(seed, k.decoder);
+  boost::hash_combine(seed, k.decoder_key.fileName);
+  boost::hash_combine(seed, k.decoder_key.filterGraphDescr.filter_descr);
+  boost::hash_combine(seed, k.decoder_key.filterGraphDescr.out_pix_fmt_name);
+  boost::hash_combine(seed, k.video_stream_index);
+  boost::hash_combine(seed, k.frame_nb);
   return seed;
 }
 

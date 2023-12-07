@@ -21,7 +21,7 @@ DecoderLRUCache &cache()
 
       auto decoder = std::make_shared<ilp_movie::Decoder>();
       if (!decoder->Open(key.fileName, key.filterGraphDescr)) {
-        result.error = std::make_shared<std::string>("Could not open decoder");
+        result.error = std::make_shared<std::string>("Cannot open decoder");
         return result;
       }
 

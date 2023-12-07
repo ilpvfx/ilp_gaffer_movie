@@ -8,12 +8,15 @@
 
 #include "ilp_movie/decoder.hpp"// ilp_movie::Decoder, ilp_movie::DecodedVideoFrame
 
+#include "internal/SharedDecoders.h"
+
 namespace IlpGafferMovie {
 namespace shared_frames_internal {
 
   struct FrameCacheKey
   {
-    ilp_movie::Decoder *decoder = nullptr;
+    //ilp_movie::Decoder *decoder = nullptr;
+    shared_decoders_internal::DecoderCacheKey decoder_key;
     int video_stream_index = -1;
     int frame_nb = -1;
   };

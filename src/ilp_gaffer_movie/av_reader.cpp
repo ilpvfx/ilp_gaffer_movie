@@ -898,21 +898,30 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   TRACE("AvReader",
     (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
-  const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
-  if (decoder == nullptr) { return nullptr; }
-  if (!decoder->IsOpen()) { return nullptr; }
+  const std::string fileName = fileNamePlug()->getValue();
+  if (fileName.empty()) { return nullptr; }
 
-  int video_stream_index = videoStreamIndexPlug()->getValue();
-  if (video_stream_index < 0) {
-    video_stream_index = decoder->BestVideoStreamIndex();
-    if (video_stream_index < 0) { return nullptr; }
-  }
+  // const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
+  // if (decoder == nullptr) { return nullptr; }
+  // if (!decoder->IsOpen()) { return nullptr; }
+
+  // int video_stream_index = videoStreamIndexPlug()->getValue();
+  // if (video_stream_index < 0) {
+  //   video_stream_index = decoder->BestVideoStreamIndex();
+  //   if (video_stream_index < 0) { return nullptr; }
+  // }
 
   // clang-format off
   const auto frameEntry = shared_frames_internal::SharedFrames::get(
     /*key=*/shared_frames_internal::FrameCacheKey{
-      /*.decoder=*/decoder.get(),
-      /*.video_stream_index=*/video_stream_index,
+      /*.decoder_key=*/shared_decoders_internal::DecoderCacheKey{ 
+        /*.fileName=*/fileName,
+        /*.filterGraphDescr=*/{ 
+          /*.filter-descr=*/filterGraphPlug()->getValue(),
+          /*.out_pix_fmt_name=*/"gbrpf32le" 
+        } 
+      },
+      /*.video_stream_index=*/videoStreamIndexPlug()->getValue(),
       /*.frame_nb=*/static_cast<int>(context->getFrame())
     });
   // clang-format on
