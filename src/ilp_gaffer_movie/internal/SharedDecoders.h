@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstddef>// size_t
+#include <cstddef>// std::size_t, size_t
 #include <memory>// std::shared_ptr
 #include <string>// std::string
 
@@ -11,7 +11,13 @@
 namespace IlpGafferMovie {
 namespace shared_decoders_internal {
 
-  struct DecoderEntry
+  struct DecoderCacheKey
+  {
+    std::string fileName;
+    ilp_movie::DecoderFilterGraphDescription filterGraphDescr;
+  };
+
+  struct DecoderCacheEntry
   {
     std::shared_ptr<ilp_movie::Decoder> decoder;
     std::shared_ptr<std::string> error;
@@ -22,14 +28,10 @@ namespace shared_decoders_internal {
   public:
     // Creates a decoder using a cache, so you don't end up opening the same
     // file multiple times.
-    static DecoderEntry get(const std::string &fileName,
-      const std::string &filterDescr,
-      const std::string &outPixFmtName);
+    static DecoderCacheEntry get(const DecoderCacheKey &key);
 
     // Erase a single decoder from the cache.
-    static void erase(const std::string &fileName,
-      const std::string &filterDescr,
-      const std::string &outPixFmtName);
+    static void erase(const DecoderCacheKey &key);
 
     // Clear the entire cache.
     static void clear();

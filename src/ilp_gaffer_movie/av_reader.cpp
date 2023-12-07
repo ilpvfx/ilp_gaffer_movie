@@ -3,6 +3,7 @@
 // The nested TaskMutex needs to be the first to include tbb
 #include "internal/LRUCache.h"
 #include "internal/SharedDecoders.h"
+#include "internal/SharedFrames.h"
 #include "internal/trace.hpp"
 
 #include <cassert>// assert
@@ -39,6 +40,7 @@ static const IECore::InternedString kTileBatchIndexContextName("__tileBatchIndex
 
 namespace {
 
+#if 0
 // For success, frame should be set, and error left null.
 // For failure, frame should be left null, and error should be set.
 struct FrameCacheEntry
@@ -73,7 +75,7 @@ std::size_t hash_value(const FrameCacheKey &k)
   boost::hash_combine(seed, k.video_stream_index);// NOLINT
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
-#else 
+#else
   std::size_t seed = 0U;
   boost::hash_combine(seed, k.frame_nb);// NOLINT
   return seed;
@@ -120,6 +122,7 @@ FrameCache *frameCache()
   static auto *c = new FrameCache(frameCacheGetter, /*maxCost=*/200);
   return c;
 }
+#endif
 
 }// namespace
 
@@ -871,12 +874,19 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
 
-  const std::string filterGraph = filterGraphPlug()->getValue();
-  static const std::string kOutPixFmt = "gbrpf32le";
-
-  auto decoderEntry =
-    shared_decoders_internal::SharedDecoders::get(fileName, filterGraph, kOutPixFmt);
-  if (decoderEntry.decoder == nullptr) { throw IECore::Exception(*(decoderEntry.error)); }
+  // clang-format off
+  const auto decoderEntry = shared_decoders_internal::SharedDecoders::get(
+    /*key=*/shared_decoders_internal::DecoderCacheKey{ 
+      /*.fileName=*/fileName,
+      /*.filterGraphDescr=*/{ 
+        /*.filter-descr=*/filterGraphPlug()->getValue(),
+        /*.out_pix_fmt_name=*/"gbrpf32le" 
+      } 
+    });
+  // clang-format on
+  if (decoderEntry.decoder == nullptr) {
+    throw IECore::Exception(decoderEntry.error != nullptr ? decoderEntry.error->c_str() : "");
+  }
 
   return decoderEntry.decoder;
 }
@@ -884,7 +894,7 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   bool holdForBlack = false*/) const
 {
-#if 0
+#if 1
   TRACE("AvReader",
     (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
@@ -898,18 +908,21 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
     if (video_stream_index < 0) { return nullptr; }
   }
 
-  FrameCacheKey key{};
-  key.decoder = decoder.get();
-  key.video_stream_index = video_stream_index;
-  key.frame_nb = static_cast<int>(context->getFrame());
-  FrameCacheEntry frameEntry = frameCache()->get(key);
+  // clang-format off
+  const auto frameEntry = shared_frames_internal::SharedFrames::get(
+    /*key=*/shared_frames_internal::FrameCacheKey{
+      /*.decoder=*/decoder.get(),
+      /*.video_stream_index=*/video_stream_index,
+      /*.frame_nb=*/static_cast<int>(context->getFrame())
+    });
+  // clang-format on
   if (frameEntry.frame == nullptr) {
     throw IECore::Exception(frameEntry.error != nullptr ? frameEntry.error->c_str() : "");
   }
 
   TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
-#endif
+#else
   const auto *p = videoStreamIndexPlug();
   if (p == nullptr) { return nullptr; }
   if (context == nullptr) { return nullptr; }
@@ -917,11 +930,12 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   if (fc == nullptr) { return nullptr; }
 
   FrameCacheKey key{};
-  key.decoder = nullptr;//decoder.get();
+  key.decoder = nullptr;// decoder.get();
   key.video_stream_index = p->getValue();
   key.frame_nb = static_cast<int>(context->getFrame());
   FrameCacheEntry frameEntry = fc->get(key);
   return nullptr;
+#endif
 
 #if 0
   MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
@@ -981,7 +995,7 @@ void AvReader::_plugSet(Gaffer::Plug *plug)
     TRACE("AvReader", "refreshCount");
 
     // NOTE(tohi): Clears decoders and frames for ALL AvReader nodes...
-    frameCache()->clear();
+    shared_frames_internal::SharedFrames::clear();
     shared_decoders_internal::SharedDecoders::clear();
   }
 }
