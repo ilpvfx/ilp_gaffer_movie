@@ -1,6 +1,7 @@
 #include <algorithm>// std::fill
 #include <iostream>// std::cout, std::cerr
 #include <string>// std::string
+#include <string_view>// std::string_view
 #include <vector>// std::vector
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,42 +9,32 @@
 #include <ilp_movie/log.hpp>
 #include <ilp_movie/mux.hpp>
 
-// Helper function - has no effect on test results.
-static void DumpLogLines(std::vector<std::string> *log_lines)
-{
-  for (auto &&line : *log_lines) { std::cerr << line; }
-  log_lines->clear();
-}
+using namespace std::literals; // "hello"sv
 
 namespace {
 
-TEST_CASE("h264")
+TEST_CASE("H264")
 {
-  std::vector<std::string> log_lines;
+  std::vector<std::string> log_lines = {};
   ilp_movie::SetLogCallback(
     [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
 
-  const auto require = [&](const bool cond) {
+  const auto dump_log_on_fail = [&](const bool cond) {
     if (!cond) {
       // Dump log before exiting.
-      DumpLogLines(&log_lines);
+      for (auto &&line : log_lines) { std::cerr << line; }
+      log_lines.clear();
     }
-    REQUIRE(cond);
-  };
-
-  const auto init_video = [&](ilp_movie::MuxContext *mux_ctx) {
-    require(mux_ctx->impl == nullptr);
-    require(ilp_movie::MuxInit(mux_ctx));
-    require(mux_ctx->impl != nullptr);
+    return cond;
   };
 
   const auto write_video = [&](const ilp_movie::MuxContext &mux_ctx,
                              const std::uint32_t frame_count) {
-    require(frame_count > 0);
+    REQUIRE(frame_count > 0);
 
-    const auto w = static_cast<std::size_t>(mux_ctx.width);
-    const auto h = static_cast<std::size_t>(mux_ctx.height);
+    const auto w = static_cast<std::size_t>(mux_ctx.params.width);
+    const auto h = static_cast<std::size_t>(mux_ctx.params.height);
     std::vector<float> r = {};
     std::vector<float> g = {};
     std::vector<float> b = {};
@@ -55,138 +46,200 @@ TEST_CASE("h264")
       std::fill(std::begin(r), std::end(r), pixel_value);
       std::fill(std::begin(g), std::end(g), pixel_value);
       std::fill(std::begin(b), std::end(b), pixel_value);
-      require(ilp_movie::MuxWriteFrame(mux_ctx,
-            ilp_movie::MuxFrame{
-              /*.width=*/mux_ctx.width,
-              /*.height=*/mux_ctx.height,
-              /*.frame_nb=*/static_cast<float>(i),
-              /*.r=*/r.data(),
-              /*.g=*/g.data(),
-              /*.b=*/b.data(),
-            }));
+      REQUIRE(dump_log_on_fail(ilp_movie::MuxWriteFrame(mux_ctx,
+        ilp_movie::MuxFrame{
+          /*.width=*/mux_ctx.params.width,
+          /*.height=*/mux_ctx.params.height,
+          /*.frame_nb=*/static_cast<float>(i),
+          /*.r=*/r.data(),
+          /*.g=*/g.data(),
+          /*.b=*/b.data(),
+        })));
     }
-    require(ilp_movie::MuxFinish(mux_ctx));
+    REQUIRE(dump_log_on_fail(ilp_movie::MuxFinish(mux_ctx)));
   };
-
-  const auto free_video = [&](ilp_movie::MuxContext *mux_ctx) {
-    require(mux_ctx->impl != nullptr);
-    ilp_movie::MuxFree(mux_ctx);
-    require(mux_ctx->impl == nullptr);
-  };
-
-  // Create a mux context with as many default settings as possible (i.e. minimal config) that
-  // should be valid.
-  ilp_movie::MuxContext mux_ctx = {};
-  mux_ctx.codec_name = "libx264";
-  mux_ctx.width = 128;
-  mux_ctx.height = 128;
 
   SECTION("default")
   {
-    // Check that we have sane default values!
-    mux_ctx.filename = "/tmp/mux_h264_default.mov";
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    // Create a mux context with as many default settings as possible (i.e. minimal config) that
+    // should be valid.
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_default.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      ilp_movie::H264::EncodeParameters{});
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(mux_params->filename == "/tmp/test_data/mux_h264_default.mov"sv);
+    REQUIRE(mux_params->width == 164);
+    REQUIRE(mux_params->height == 128);
+    REQUIRE(mux_params->frame_rate == 24.0);
+    REQUIRE(!mux_params->pix_fmt.empty());
+    REQUIRE(!mux_params->color_range.empty());
+    REQUIRE(!mux_params->color_primaries.empty());
+    REQUIRE(!mux_params->colorspace.empty());
+    REQUIRE(!mux_params->color_trc.empty());
+    REQUIRE(!mux_params->codec_name.empty());
+    REQUIRE(!mux_params->preset.empty());
+    REQUIRE(!mux_params->tune.empty());
+    REQUIRE(mux_params->crf >= 0);
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
   SECTION("preset")
   {
-    mux_ctx.filename = "/tmp/mux_h264_medium.mov";
-    mux_ctx.h264.cfg.preset = ilp_movie::h264::Preset::kMedium;
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.preset = ilp_movie::H264::Preset::kMedium;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_medium.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
   SECTION("bad preset")
   {
-    mux_ctx.filename = "/tmp/mux_h264_bad_preset.mov";
-    mux_ctx.h264.cfg.preset = "__bad_preset";
-    require(!ilp_movie::MuxInit(&mux_ctx));
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.preset = "__bad_preset"sv;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_bad_preset.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
 
   SECTION("pixel format")
   {
-    mux_ctx.filename = "/tmp/mux_h264_yuv422p10.mov";
-    mux_ctx.h264.cfg.pix_fmt = ilp_movie::h264::PixelFormat::kYuv422p10;
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.pix_fmt = ilp_movie::H264::PixelFormat::kYuv422p10;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_yuv422p10.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
   SECTION("bad pixel format")
   {
-    mux_ctx.filename = "/tmp/mux_h264_bad_pix_fmt.mov";
-    mux_ctx.h264.cfg.pix_fmt = "__bad_pix_fmt";
-    require(!ilp_movie::MuxInit(&mux_ctx));
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.pix_fmt = "__bad_pix_fmt"sv;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_bad_pix_fmt.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
 
   SECTION("tune")
   {
-    mux_ctx.filename = "/tmp/mux_h264_tune.mov";
-    mux_ctx.h264.cfg.tune = ilp_movie::h264::Tune::kFilm;
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.tune = ilp_movie::H264::Tune::kFilm;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_tune.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
   SECTION("bad tune")
   {
-    mux_ctx.filename = "/tmp/mux_h264_bad_tune.mov";
-    mux_ctx.h264.cfg.tune = "__bad_tune";
-    require(!ilp_movie::MuxInit(&mux_ctx));
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.pix_fmt = "__bad_tune"sv;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_bad_tune.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
 
   SECTION("crf")
   {
-    mux_ctx.filename = "/tmp/mux_h264_crf.mov";
-    mux_ctx.h264.cfg.crf = 27;
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.crf = 27;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_crf.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
   SECTION("bad crf (<0)")
   {
-    mux_ctx.filename = "/tmp/mux_h264_bad_crf.mov";
-    mux_ctx.h264.cfg.crf = -1;
-    require(!ilp_movie::MuxInit(&mux_ctx));
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.crf = -1;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_neg_crf.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
   SECTION("bad crf (>51)")
   {
-    mux_ctx.filename = "/tmp/mux_h264_bad_crf2.mov";
-    mux_ctx.h264.cfg.crf = 78;
-    require(!ilp_movie::MuxInit(&mux_ctx));
+    ilp_movie::H264::EncodeParameters enc_params = {};
+    enc_params.crf = 78;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_h264_big_crf.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
-
-  // Check that the test doesn't leak resources.
-  require(mux_ctx.impl == nullptr);
 }
 
 TEST_CASE("ProRes")
 {
-  std::vector<std::string> log_lines;
+  std::vector<std::string> log_lines = {};
   ilp_movie::SetLogCallback(
     [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
 
-  const auto require = [&](const bool cond) {
+  const auto dump_log_on_fail = [&](const bool cond) {
     if (!cond) {
       // Dump log before exiting.
-      DumpLogLines(&log_lines);
+      for (auto &&line : log_lines) { std::cerr << line; }
+      log_lines.clear();
     }
-    REQUIRE(cond);
-  };
-
-  const auto init_video = [&](ilp_movie::MuxContext *mux_ctx) {
-    require(mux_ctx->impl == nullptr);
-    require(ilp_movie::MuxInit(mux_ctx));
-    require(mux_ctx->impl != nullptr);
+    return cond;
   };
 
   const auto write_video = [&](const ilp_movie::MuxContext &mux_ctx,
                              const std::uint32_t frame_count) {
-    require(frame_count > 0);
+    REQUIRE(frame_count > 0);
 
-    const auto w = static_cast<std::size_t>(mux_ctx.width);
-    const auto h = static_cast<std::size_t>(mux_ctx.height);
+    const auto w = static_cast<std::size_t>(mux_ctx.params.width);
+    const auto h = static_cast<std::size_t>(mux_ctx.params.height);
     std::vector<float> r = {};
     std::vector<float> g = {};
     std::vector<float> b = {};
@@ -198,110 +251,185 @@ TEST_CASE("ProRes")
       std::fill(std::begin(r), std::end(r), pixel_value);
       std::fill(std::begin(g), std::end(g), pixel_value);
       std::fill(std::begin(b), std::end(b), pixel_value);
-      require(ilp_movie::MuxWriteFrame(mux_ctx,
-            ilp_movie::MuxFrame{
-              /*.width=*/mux_ctx.width,
-              /*.height=*/mux_ctx.height,
-              /*.frame_nb=*/static_cast<float>(i),
-              /*.r=*/r.data(),
-              /*.g=*/g.data(),
-              /*.b=*/b.data(),
-            }));
+      REQUIRE(dump_log_on_fail(ilp_movie::MuxWriteFrame(mux_ctx,
+        ilp_movie::MuxFrame{
+          /*.width=*/mux_ctx.params.width,
+          /*.height=*/mux_ctx.params.height,
+          /*.frame_nb=*/static_cast<float>(i),
+          /*.r=*/r.data(),
+          /*.g=*/g.data(),
+          /*.b=*/b.data(),
+        })));
     }
-    require(ilp_movie::MuxFinish(mux_ctx));
+    REQUIRE(dump_log_on_fail(ilp_movie::MuxFinish(mux_ctx)));
   };
-
-  const auto free_video = [&](ilp_movie::MuxContext *mux_ctx) {
-    require(mux_ctx->impl != nullptr);
-    ilp_movie::MuxFree(mux_ctx);
-    require(mux_ctx->impl == nullptr);
-  };
-
-  // Create a mux context with as many default settings as possible (i.e. minimal config) that
-  // should be valid.
-  ilp_movie::MuxContext mux_ctx = {};
-  mux_ctx.codec_name = "prores_ks";
-  mux_ctx.width = 128;
-  mux_ctx.height = 128;
 
   SECTION("default")
   {
-    // Check that we have sane default values!
-    mux_ctx.filename = "/tmp/mux_prores_default.mov";
-
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    // Create a mux context with as many default settings as possible (i.e. minimal config) that
+    // should be valid.
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_default.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      ilp_movie::ProRes::EncodeParameters{});
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(mux_params->filename == "/tmp/test_data/mux_prores_default.mov"sv);
+    REQUIRE(mux_params->width == 164);
+    REQUIRE(mux_params->height == 128);
+    REQUIRE(mux_params->frame_rate == 24.0);
+    REQUIRE(!mux_params->pix_fmt.empty());
+    REQUIRE(!mux_params->codec_name.empty());
+    REQUIRE(mux_params->profile >= 0);
+    REQUIRE(mux_params->qscale >= 0);
+    REQUIRE(!mux_params->vendor.empty());
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
-  SECTION("proxy") {
-    mux_ctx.filename = "/tmp/mux_prores_proxy.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("proxy").value();
-
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+  SECTION("proxy")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kProxy;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_proxy.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
-  SECTION("lt") {
-    mux_ctx.filename = "/tmp/mux_prores_proxy.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("lt").value();
-
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+  SECTION("lt")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kLt;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_lt.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
-  SECTION("standard") {
-    mux_ctx.filename = "/tmp/mux_prores_standard.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("standard").value();
-
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+  SECTION("standard")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kStandard;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_standard.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
-  SECTION("hq") {
-    mux_ctx.filename = "/tmp/mux_prores_hq.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("hq").value();
-
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+  SECTION("hq")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_hq.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
   }
 
-  SECTION("4444") {
-    mux_ctx.filename = "/tmp/mux_prores_4444.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("4444").value();
+  SECTION("4444")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::k4444;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_4444.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
 
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    // TODO(tohi): Test that we get a different pix_fmt if we request alpha?
   }
 
-  SECTION("4444xq") {
-    mux_ctx.filename = "/tmp/mux_prores_4444xq.mov";
-    mux_ctx.pro_res.cfg = ilp_movie::ProRes::Config::Preset("4444xq").value();
+  SECTION("4444xq")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::k4444xq;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_4444xq.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    auto mux_ctx = ilp_movie::MakeMuxContext(*mux_params);
+    REQUIRE(dump_log_on_fail(mux_ctx != nullptr));
+    write_video(*mux_ctx, /*frame_count=*/100);
 
-    init_video(&mux_ctx);
-    write_video(mux_ctx, /*frame_count=*/100);
-    free_video(&mux_ctx);
+    // TODO(tohi): Test that we get a different pix_fmt if we request alpha?
   }
 
-  SECTION("bad qscale") {
-    mux_ctx.filename = "/tmp/mux_prores_bad_qscale.mov";
-    mux_ctx.pro_res.cfg.qscale = -13;
-    require(!ilp_movie::MuxInit(&mux_ctx));
+  SECTION("bad alpha")
+  {
+    // Only some profiles (4444) support alpha.
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;
+    enc_params.alpha = true;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_bad_alpha.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(!mux_params.has_value());
   }
 
-  SECTION("mp4") {
-    // mp4 container currently doesn't support ProRes encoder.
-    mux_ctx.filename = "/tmp/mux_prores.mp4";
-    require(!ilp_movie::MuxInit(&mux_ctx));
+  SECTION("bad qscale")
+  {
+    ilp_movie::ProRes::EncodeParameters enc_params = {};
+    enc_params.qscale = -13;
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_bad_qscale.mov",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      enc_params);
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
   }
 
-  // Check that the test doesn't leak resources.
-  require(mux_ctx.impl == nullptr);
+  SECTION("mp4")
+  {
+    // mp4 container currently doesn't support ProRes codec.
+    const auto mux_params = ilp_movie::MakeMuxParameters(
+      /*filename=*/"/tmp/test_data/mux_prores_bad_format.mp4",
+      /*width=*/164,
+      /*height=*/128,
+      /*frame_rate=*/24.0,
+      ilp_movie::ProRes::EncodeParameters{});
+    REQUIRE(dump_log_on_fail(mux_params.has_value()));
+    REQUIRE(dump_log_on_fail(ilp_movie::MakeMuxContext(*mux_params) == nullptr));
+  }
 }
 
 }// namespace

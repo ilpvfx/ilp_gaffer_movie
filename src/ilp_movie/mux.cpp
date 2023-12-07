@@ -32,6 +32,8 @@ extern "C" {
 #include <internal/filter_graph.hpp>
 #include <internal/log_utils.hpp>
 
+using namespace std::literals;// "hello"sv
+
 namespace ilp_movie {
 
 struct MuxImpl
@@ -43,9 +45,10 @@ struct MuxImpl
   AVPacket *enc_pkt = nullptr;
   AVFrame *enc_frame = nullptr;
 
-  AVFilterGraph *graph = nullptr;
-  AVFilterContext *buffersink_ctx = nullptr;
-  AVFilterContext *buffersrc_ctx = nullptr;
+  std::unique_ptr<filter_graph_internal::FilterGraph> filter_graph;
+  // AVFilterGraph *graph = nullptr;
+  // AVFilterContext *buffersink_ctx = nullptr;
+  // AVFilterContext *buffersrc_ctx = nullptr;
   // AVFrame *dec_frame = nullptr;
 
 #if 0
@@ -61,8 +64,8 @@ struct MuxImpl
 
 }// namespace ilp_movie
 
-[[nodiscard]] static auto OpenOutputFile(const char *filename,
-  const char *enc_name,
+[[nodiscard]] static auto OpenOutputFile(const std::string_view filename,
+  const std::string_view enc_name,
   const double fps,
   const int width,
   const int height,
@@ -76,7 +79,7 @@ struct MuxImpl
   if (const int ret = avformat_alloc_output_context2(&fmt_ctx,
         /*oformat=*/nullptr,
         /*format_name=*/nullptr,
-        filename);
+        filename.data());
       ret < 0 || fmt_ctx == nullptr) {
     log_utils_internal::LogAvError("Cannot create output context", ret);
     return false;
@@ -92,7 +95,7 @@ struct MuxImpl
   out_stream->id = static_cast<int>(fmt_ctx->nb_streams - 1U);
 
   // Find the encoder.
-  const AVCodec *encoder = avcodec_find_encoder_by_name(enc_name);
+  const AVCodec *encoder = avcodec_find_encoder_by_name(enc_name.data());
   if (encoder == nullptr) {
     std::ostringstream oss;
     oss << "Cannot find encoder '" << enc_name << "'\n";
@@ -164,7 +167,7 @@ struct MuxImpl
 
   // Open the output file, if needed.
   if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
-    if (const int ret = avio_open(&(fmt_ctx)->pb, filename, AVIO_FLAG_WRITE); ret < 0) {
+    if (const int ret = avio_open(&(fmt_ctx)->pb, filename.data(), AVIO_FLAG_WRITE); ret < 0) {
       std::ostringstream oss;
       oss << "Cannot open output file '" << filename << "'";
       log_utils_internal::LogAvError(oss.str().c_str(), ret);
@@ -199,8 +202,7 @@ struct MuxImpl
   if (!(enc_ctx != nullptr && qscale >= 0)) { return false; }
 
   // From ffmpeg source code.
-  // NOLINTNEXTLINE
-  enc_ctx->flags |= AV_CODEC_FLAG_QSCALE;
+  enc_ctx->flags |= AV_CODEC_FLAG_QSCALE;// NOLINT
   enc_ctx->global_quality = FF_QP2LAMBDA * qscale;
   return true;
 }
@@ -240,11 +242,25 @@ struct MuxImpl
 [[nodiscard]] static auto FilterEncodeWriteFrame(AVFormatContext *ofmt_ctx,
   AVCodecContext *enc_ctx,
   AVPacket *enc_pkt,
-  AVFrame *enc_frame,
-  AVFilterContext *buffersrc_ctx,
-  AVFilterContext *buffersink_ctx,
+  AVFrame * /*enc_frame*/,
+  filter_graph_internal::FilterGraph* filter_graph,
   AVFrame *dec_frame) noexcept -> bool
 {
+  bool ok = true;
+  bool b = filter_graph->FilterFrames(dec_frame, [&](AVFrame* frame) {
+    return EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame);
+  });
+  return b && ok;
+
+  // bool w = true;
+  // while (filter_graph->FilterFrame(dec_frame, enc_frame)) {
+  //   enc_frame->pict_type = AV_PICTURE_TYPE_NONE;
+  //   w = EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, enc_frame);
+  //   if (!w) { break; }
+  // }
+  // return w;
+
+#if 0
   // Push the decoded frame into the filter graph.
   // NOTE(tohi): Resets the frame!
   // if (const int ret = av_buffersrc_add_frame_flags(buffersrc_ctx, dec_frame, /*flags=*/0)) {
@@ -276,6 +292,7 @@ struct MuxImpl
   }
 
   return w && ret >= 0;
+#endif
 }
 
 #if 0
@@ -296,127 +313,232 @@ static void LogPacket(const AVFormatContext *fmt_ctx, const AVPacket *pkt) noexc
 
 namespace ilp_movie {
 
-auto MuxInit(MuxContext *const mux_ctx) noexcept -> bool
+auto MakeMuxParameters(const std::string_view filename,
+  const int width,
+  const int height,
+  const double frame_rate,
+  const ProRes::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>
 {
-  // Helper function to make sure we always tear down allocated resources
-  // before exiting as a result of failure.
-  const auto exit_func = [](const bool success, MuxContext *const mux_ctx_arg) {
-    if (!success && mux_ctx_arg != nullptr && mux_ctx_arg->impl != nullptr) {
-      MuxFree(mux_ctx_arg);
+  MuxParameters p = {};
+
+  // NOTE: We are only considering 10-bit pixel formats for now.
+  // 4:2:2 profiles (no alpha support).
+  if (enc_params.profile_name == ProRes::ProfileName::kProxy && !enc_params.alpha) {
+    p.profile = 0;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kLt && !enc_params.alpha) {
+    p.profile = 1;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kStandard && !enc_params.alpha) {
+    p.profile = 2;
+    p.pix_fmt = "yuv422p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::kHq && !enc_params.alpha) {
+    p.profile = 3;
+    p.pix_fmt = "yuv422p10le"sv;
+  }
+  // 4:4:4 profiles (optional alpha).
+  else if (enc_params.profile_name == ProRes::ProfileName::k4444) {
+    p.profile = 4;
+    p.pix_fmt = enc_params.alpha ? "yuva444p10le"sv : "yuv444p10le"sv;
+  } else if (enc_params.profile_name == ProRes::ProfileName::k4444xq) {
+    p.profile = 5;
+    p.pix_fmt = enc_params.alpha ? "yuva444p10le"sv : "yuv444p10le"sv;
+  } else {
+    // Unrecognized profile name.
+    LogMsg(LogLevel::kError, "Unrecognized ProRes profile name\n");
+    return std::nullopt;
+  }
+
+  // Fill in the parameters relevant for ProRes encoding.
+  p.filename = filename;
+  p.width = width;
+  p.height = height;
+  p.frame_rate = frame_rate;
+
+  // TODO(tohi): Set these, is the metadata correctly set on the container/format by the codec?
+  // p.color_range = "pc"sv;
+  // p.color_primaries = "bt709"sv;
+  // p.colorspace = "bt709"sv;
+  // p.color_trc = "iec61966-2-1"sv;
+
+  // p.sws_flags = "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
+  p.filter_graph =
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"sv;
+
+  p.codec_name = "prores_ks"sv;
+  p.qscale = enc_params.qscale;
+
+  // Tricks QuickTime and Final Cut Pro into thinking that the movie was generated using a
+  // QuickTime ProRes encoder.
+  p.vendor = "apl0"sv;
+
+  return p;
+}
+
+auto MakeMuxParameters(const std::string_view filename,
+  const int width,
+  const int height,
+  const double frame_rate,
+  const H264::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>
+{
+
+  // Fill in the parameters relevant for ProRes encoding.
+  MuxParameters p = {};
+  p.filename = filename;
+  p.width = width;
+  p.height = height;
+  p.frame_rate = frame_rate;
+  p.pix_fmt = enc_params.pix_fmt;
+
+  p.color_range = enc_params.color_range;
+  p.color_primaries = enc_params.color_primaries;
+  p.colorspace = enc_params.colorspace;
+  p.color_trc = enc_params.color_trc;
+
+  p.filter_graph =
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"
+    ":flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"sv;
+
+  p.codec_name = "libx264";
+  p.preset = enc_params.preset;
+  p.tune = enc_params.tune;
+  p.x264_params = enc_params.x264_params;
+  p.crf = enc_params.crf;
+
+  return p;
+}
+
+auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<MuxContext>
+{
+  if (params.filename.empty()) {
+    LogMsg(LogLevel::kError, "Empty filename\n");
+    return nullptr;
+  }
+
+  // Allocate the implementation specific data. The deleter will be invoked if we leave this
+  // function before moving the implementation to the context.
+  auto impl = mux_impl_ptr(new MuxImpl(), [](MuxImpl *impl_ptr) noexcept {
+    LogMsg(LogLevel::kInfo, "Free mux implementation\n");
+    assert(impl_ptr != nullptr);// NOLINT
+
+    avcodec_free_context(&(impl_ptr->enc_ctx));
+    av_frame_free(&(impl_ptr->enc_frame));
+    av_packet_free(&(impl_ptr->enc_pkt));
+
+    if (impl_ptr->ofmt_ctx != nullptr) {
+      if (!(impl_ptr->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
+        if (impl_ptr->ofmt_ctx->pb != nullptr) {
+          if (const int ret = avio_closep(&(impl_ptr->ofmt_ctx->pb)); ret < 0) {
+            log_utils_internal::LogAvError("Cannot close file", ret);
+            // std::abort()!?
+          }
+        }
+      }
     }
-    return success;
-  };
 
-  if (mux_ctx == nullptr) {
-    LogMsg(LogLevel::kError, "Bad mux context\n");
-    return exit_func(/*success=*/false, mux_ctx);
-  }
-  if (mux_ctx->impl != nullptr) {
-    LogMsg(LogLevel::kError, "Found stale mux implementation\n");
-    return exit_func(/*success=*/false, mux_ctx);
-  }
-  if (mux_ctx->filename == nullptr) {
-    LogMsg(LogLevel::kError, "Bad filename\n");
-    return exit_func(/*success=*/false, mux_ctx);
-  }
-
-  // Allocate the implementation specific data.
-  // MUST be manually free'd at some later point.
-  mux_ctx->impl = new MuxImpl;// NOLINT
-  MuxImpl *impl = mux_ctx->impl;
+    avformat_free_context(impl_ptr->ofmt_ctx);
+    delete impl_ptr;// NOLINT
+  });
 
   // Allocate packets and frames.
   impl->enc_pkt = av_packet_alloc();
   impl->enc_frame = av_frame_alloc();
   if (!(impl->enc_pkt != nullptr && impl->enc_frame != nullptr)) {
     LogMsg(LogLevel::kError, "Cannot allocate frames/packets\n");
-    return exit_func(/*success=*/false, mux_ctx);
+    return nullptr;
   }
 
   if (!OpenOutputFile(
-        mux_ctx->filename,
-        mux_ctx->codec_name,
-        mux_ctx->fps,
-        mux_ctx->width,
-        mux_ctx->height,
+        params.filename,
+        params.codec_name,
+        params.frame_rate,
+        params.width,
+        params.height,
         [&](AVCodecContext *codec_ctx, AVDictionary **enc_opt) {
           if (codec_ctx == nullptr) {
             LogMsg(LogLevel::kError, "Encoding context not initialized\n");
             return false;
           }
 
-          const int color_range = av_color_range_from_name(mux_ctx->mp4_metadata.color_range);
-          if (color_range < 0) {
-            std::stringstream oss;
-            oss << "Could not set color range '" << mux_ctx->mp4_metadata.color_range << "'";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_range);
-            return false;
+          if (!params.color_range.empty()) {
+            const int color_range = av_color_range_from_name(params.color_range.c_str());
+            if (color_range < 0) {
+              std::stringstream oss;
+              oss << "Could not set color range '" << params.color_range << "'";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_range);
+              return false;
+            }
+            codec_ctx->color_range = static_cast<AVColorRange>(color_range);
           }
-          codec_ctx->color_range = static_cast<AVColorRange>(color_range);
 
-          const int colorspace = av_color_space_from_name(mux_ctx->mp4_metadata.colorspace);
-          if (colorspace < 0) {
-            std::stringstream oss;
-            oss << "Could not set colorspace '" << mux_ctx->mp4_metadata.colorspace << "'";
-            log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
-            return false;
+          if (!params.colorspace.empty()) {
+            const int colorspace = av_color_space_from_name(params.colorspace.c_str());
+            if (colorspace < 0) {
+              std::stringstream oss;
+              oss << "Could not set colorspace '" << params.colorspace << "'";
+              log_utils_internal::LogAvError(oss.str().c_str(), colorspace);
+              return false;
+            }
+            codec_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
           }
-          codec_ctx->colorspace = static_cast<AVColorSpace>(colorspace);
 
-          const int color_primaries =
-            av_color_primaries_from_name(mux_ctx->mp4_metadata.color_primaries);
-          if (color_primaries < 0) {
-            std::stringstream oss;
-            oss << "Could not set color primaries '" << mux_ctx->mp4_metadata.color_primaries
-                << "'\n";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
+          if (!params.color_primaries.empty()) {
+            const int color_primaries =
+              av_color_primaries_from_name(params.color_primaries.c_str());
+            if (color_primaries < 0) {
+              std::stringstream oss;
+              oss << "Could not set color primaries '" << params.color_primaries << "'\n";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_primaries);
+              return false;
+            }
+            codec_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
           }
-          codec_ctx->color_primaries = static_cast<AVColorPrimaries>(color_primaries);
 
-          const int color_trc = av_color_transfer_from_name(mux_ctx->mp4_metadata.color_trc);
-          if (color_trc < 0) {
-            std::stringstream oss;
-            oss << "Could not set color transfer characteristics '"
-                << mux_ctx->mp4_metadata.color_trc << "'\n";
-            log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
+          if (!params.color_trc.empty()) {
+            const int color_trc = av_color_transfer_from_name(params.color_trc.c_str());
+            if (color_trc < 0) {
+              std::stringstream oss;
+              oss << "Could not set color transfer characteristics '" << params.color_trc << "'\n";
+              log_utils_internal::LogAvError(oss.str().c_str(), color_trc);
+              return false;
+            }
+            codec_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
           }
-          codec_ctx->color_trc = static_cast<AVColorTransferCharacteristic>(color_trc);
 
           if (codec_ctx->codec_id == AV_CODEC_ID_H264) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->h264.cfg.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pix_fmt.c_str());
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             codec_ctx->pix_fmt = pix_fmt;
 
-            if (!(0 <= mux_ctx->h264.cfg.crf && mux_ctx->h264.cfg.crf <= 51)) {
+            if (!(0 <= params.crf && params.crf <= 51)) {
               LogMsg(LogLevel::kError, "Bad CRF (must be in [0..51])\n");
               return false;
             }
 
-            av_dict_set(enc_opt, "preset", mux_ctx->h264.cfg.preset, /*flags=*/0);
-            av_dict_set_int(enc_opt, "crf", mux_ctx->h264.cfg.crf, /*flags=*/0);
-            av_dict_set(enc_opt, "x264-params", mux_ctx->h264.cfg.x264_params, /*flags=*/0);
-            if (mux_ctx->h264.cfg.tune != nullptr) {
-              av_dict_set(enc_opt, "tune", mux_ctx->h264.cfg.tune, /*flags=*/0);
+            av_dict_set(enc_opt, "preset", params.preset.c_str(), /*flags=*/0);
+            av_dict_set_int(enc_opt, "crf", params.crf, /*flags=*/0);
+            av_dict_set(enc_opt, "x264-params", params.x264_params.c_str(), /*flags=*/0);
+            if (params.tune != H264::Tune::kNone) {
+              av_dict_set(enc_opt, "tune", params.tune.c_str(), /*flags=*/0);
             }
           } else if (codec_ctx->codec_id == AV_CODEC_ID_PRORES) {
-            const AVPixelFormat pix_fmt = av_get_pix_fmt(mux_ctx->pro_res.cfg.pix_fmt);
+            const AVPixelFormat pix_fmt = av_get_pix_fmt(params.pix_fmt.c_str());
             if (pix_fmt == AV_PIX_FMT_NONE) {
               LogMsg(LogLevel::kError, "Could not find pixel format\n");
               return false;
             }
             codec_ctx->pix_fmt = pix_fmt;
 
-            if (!SetQScale(codec_ctx, mux_ctx->pro_res.cfg.qscale)) {
+            if (!SetQScale(codec_ctx, params.qscale)) {
               LogMsg(LogLevel::kError, "Could not set qscale\n");
               return false;
             }
 
-            av_dict_set_int(
-              enc_opt, "profile", static_cast<int64_t>(mux_ctx->pro_res.cfg.profile), /*flags=*/0);
-            av_dict_set(enc_opt, "vendor", mux_ctx->pro_res.cfg.vendor, /*flags=*/0);
+            av_dict_set_int(enc_opt, "profile", static_cast<int64_t>(params.profile), /*flags=*/0);
+            av_dict_set(enc_opt, "vendor", params.vendor.c_str(), /*flags=*/0);
           } else {
             LogMsg(LogLevel::kError, "Could not configure unsupported encoder\n");
             return false;
@@ -426,38 +548,36 @@ auto MuxInit(MuxContext *const mux_ctx) noexcept -> bool
         },
         &(impl->ofmt_ctx),
         &(impl->enc_ctx))) {
-    return exit_func(/*success=*/false, mux_ctx);
+    return nullptr;
   }
 
-  av_dump_format(impl->ofmt_ctx, /*index=*/0, mux_ctx->filename, /*is_output=*/1);
+  av_dump_format(impl->ofmt_ctx, /*index=*/0, params.filename.c_str(), /*is_output=*/1);
 
-  filter_graph_internal::FilterGraphArgs fg_args = {};
-  fg_args.codec_ctx = impl->enc_ctx;
-  fg_args.filter_graph = mux_ctx->filtergraph;
-  fg_args.sws_flags = mux_ctx->sws_flags;
-  fg_args.in.pix_fmt = AV_PIX_FMT_GBRPF32;
-  fg_args.in.time_base = impl->enc_ctx->time_base;
-  fg_args.out.pix_fmt = impl->enc_ctx->pix_fmt;
-  if (!filter_graph_internal::ConfigureVideoFilters(
-        fg_args, &(impl->graph), &(impl->buffersrc_ctx), &(impl->buffersink_ctx))) {
-    return exit_func(/*success=*/false, mux_ctx);
+  filter_graph_internal::FilterGraphDescription fg_descr = {};
+  fg_descr.filter_descr = params.filter_graph;
+  fg_descr.in.width = impl->enc_ctx->width;
+  fg_descr.in.height = impl->enc_ctx->height;
+  fg_descr.in.pix_fmt = AV_PIX_FMT_GBRPF32;
+  fg_descr.in.sample_aspect_ratio = impl->enc_ctx->sample_aspect_ratio;
+  fg_descr.in.time_base = impl->ofmt_ctx->streams[0]->time_base;// NOLINT
+  fg_descr.out.pix_fmt = impl->enc_ctx->pix_fmt;
+  impl->filter_graph = std::make_unique<filter_graph_internal::FilterGraph>();
+  if (!impl->filter_graph->SetDescription(fg_descr)) { 
+    return nullptr;
   }
 
-  return exit_func(/*success=*/true, mux_ctx);
+  auto mux_ctx = std::make_unique<MuxContext>();
+  mux_ctx->params = params;
+  mux_ctx->impl = std::move(impl);
+  return mux_ctx;
 }
 
 auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcept -> bool
 {
-  if (mux_ctx.impl == nullptr) {
-    LogMsg(LogLevel::kError, "Bad mux context\n");
-    return false;
-  }
-  MuxImpl *impl = mux_ctx.impl;
-
   // clang-format off
   // TODO(tohi): Any way to check if frame_nb is bad? Must be positive?
-  if (!(mux_frame.width == impl->enc_ctx->width && 
-        mux_frame.height == impl->enc_ctx->height && 
+  if (!(mux_frame.width == mux_ctx.impl->enc_ctx->width && 
+        mux_frame.height == mux_ctx.impl->enc_ctx->height && 
         mux_frame.r != nullptr &&
         mux_frame.g != nullptr &&
         mux_frame.b != nullptr)) {
@@ -470,7 +590,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
   // Create a frame and fill in the pixel data from the given mux frame.
   AVFrame *dec_frame = av_frame_alloc();
   if (dec_frame == nullptr) {
-    LogMsg(LogLevel::kError, "Could not allocate decode frame\n");
+    LogMsg(LogLevel::kError, "Cannot allocate decode frame\n");
     return false;
   }
   dec_frame->format = AV_PIX_FMT_GBRPF32;
@@ -478,7 +598,7 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
   dec_frame->height = mux_frame.height;
   dec_frame->pts = static_cast<int64_t>(mux_frame.frame_nb);
   if (const int ret = av_frame_get_buffer(dec_frame, /*align=*/0); ret < 0) {
-    log_utils_internal::LogAvError("Could not allocate decode frame buffer", ret);
+    log_utils_internal::LogAvError("Cannot allocate decode frame buffer", ret);
     return false;
   }
 
@@ -487,53 +607,48 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
   std::memcpy(/*__dest=*/dec_frame->data[1], /*__src=*/mux_frame.b, byte_count);
   std::memcpy(/*__dest=*/dec_frame->data[2], /*__src=*/mux_frame.r, byte_count);
 
-  return FilterEncodeWriteFrame(impl->ofmt_ctx,
-    impl->enc_ctx,
-    impl->enc_pkt,
-    impl->enc_frame,
-    impl->buffersrc_ctx,
-    impl->buffersink_ctx,
+  return FilterEncodeWriteFrame(mux_ctx.impl->ofmt_ctx,
+    mux_ctx.impl->enc_ctx,
+    mux_ctx.impl->enc_pkt,
+    mux_ctx.impl->enc_frame,
+    mux_ctx.impl->filter_graph.get(),
     dec_frame);
 }
 
 auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
 {
-  if (mux_ctx.impl == nullptr) {
-    LogMsg(LogLevel::kError, "Bad mux context\n");
-    return false;
-  }
-  MuxImpl *impl = mux_ctx.impl;
-
   // Flush filter.
   LogMsg(LogLevel::kInfo, "Flushing filter\n");
-  if (!FilterEncodeWriteFrame(impl->ofmt_ctx,
-        impl->enc_ctx,
-        impl->enc_pkt,
-        impl->enc_frame,
-        impl->buffersrc_ctx,
-        impl->buffersink_ctx,
+  if (!FilterEncodeWriteFrame(mux_ctx.impl->ofmt_ctx,
+        mux_ctx.impl->enc_ctx,
+        mux_ctx.impl->enc_pkt,
+        mux_ctx.impl->enc_frame,
+        mux_ctx.impl->filter_graph.get(),
         /*dec_frame=*/nullptr)) {
     LogMsg(LogLevel::kError, "Cannot flush filter\n");
     return false;
   }
 
   // Flush encoder.
-  if (impl->enc_ctx->codec->capabilities & AV_CODEC_CAP_DELAY) {// NOLINT
+  if (mux_ctx.impl->enc_ctx->codec->capabilities & AV_CODEC_CAP_DELAY) {// NOLINT
     LogMsg(LogLevel::kInfo, "Flushing stream encoder\n");
-    if (!EncodeWriteFrame(impl->ofmt_ctx, impl->enc_ctx, impl->enc_pkt, /*enc_frame=*/nullptr)) {
+    if (!EncodeWriteFrame(mux_ctx.impl->ofmt_ctx,
+          mux_ctx.impl->enc_ctx,
+          mux_ctx.impl->enc_pkt,
+          /*enc_frame=*/nullptr)) {
       LogMsg(LogLevel::kError, "Cannot flush stream encoder\n");
       return false;
     }
   }
 
-  if (const int ret = av_write_trailer(impl->ofmt_ctx); ret < 0) {
+  if (const int ret = av_write_trailer(mux_ctx.impl->ofmt_ctx); ret < 0) {
     LogMsg(LogLevel::kError, "Cannot write trailer\n");
     return false;
   }
 
   // Close the output file, if any.
-  if (!(impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
-    if (const int ret = avio_closep(&(impl->ofmt_ctx->pb)); ret < 0) {
+  if (!(mux_ctx.impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
+    if (const int ret = avio_closep(&(mux_ctx.impl->ofmt_ctx->pb)); ret < 0) {
       log_utils_internal::LogAvError("Cannot close file", ret);
       return false;
     }
@@ -541,35 +656,6 @@ auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
   LogMsg(LogLevel::kInfo, "Closed file\n");
 
   return true;
-}
-
-void MuxFree(MuxContext *const mux_ctx) noexcept
-{
-  if (mux_ctx == nullptr) { return; }// Nothing to free!
-  MuxImpl *impl = mux_ctx->impl;
-  if (impl == nullptr) { return; }// Nothing to free!
-
-  avfilter_graph_free(&(impl->graph));
-  avcodec_free_context(&(impl->enc_ctx));
-  av_frame_free(&(impl->enc_frame));
-  av_packet_free(&(impl->enc_pkt));
-
-  if (impl->ofmt_ctx != nullptr) {
-    if (!(impl->ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {// NOLINT
-      if (impl->ofmt_ctx->pb != nullptr) {
-        if (const int ret = avio_closep(&(impl->ofmt_ctx->pb)); ret < 0) {
-          log_utils_internal::LogAvError("Cannot close file", ret);
-          // return false!?
-        }
-      }
-    }
-  }
-
-  avformat_free_context(impl->ofmt_ctx);
-
-  // Free the memory used to store the implementation handles.
-  delete impl;// NOLINT
-  mux_ctx->impl = nullptr;
 }
 
 }// namespace ilp_movie

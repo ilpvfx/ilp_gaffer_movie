@@ -1,9 +1,12 @@
 include(GenerateExportHeader)
 
 add_library(IlpGafferMovie SHARED 
-  av_reader.cpp
-  movie_reader.cpp
-  movie_writer.cpp)
+  "av_reader.cpp"
+  "movie_reader.cpp"
+  "movie_writer.cpp"
+  "internal/SharedDecoders.cpp"
+  "internal/SharedFrames.cpp"
+  "internal/trace.cpp")
 add_library(ilp_gaffer_movie::IlpGafferMovie ALIAS IlpGafferMovie)  
 target_link_libraries(IlpGafferMovie 
   PRIVATE

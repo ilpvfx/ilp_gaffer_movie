@@ -1,7 +1,13 @@
 #pragma once
 
-#include <Gaffer/NumericPlug.h>
 #include <GafferImage/ImageNode.h>
+
+#include <Gaffer/NumericPlug.h>
+
+#include <memory>
+#include <string>// std::string
+#include <vector>// std::vector
+
 
 #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
 #include <ilp_gaffer_movie/type_id.hpp>
@@ -11,6 +17,11 @@ IE_CORE_FORWARDDECLARE(StringPlug)
 }// namespace Gaffer
 
 namespace IlpGafferMovie {
+
+// Convenience macro for declaring plug member functions.
+#define PLUG_MEMBER_DECL(name, type) \
+  type *name();                      \
+  const type *name() const;
 
 class ILPGAFFERMOVIE_EXPORT AvReader : public GafferImage::ImageNode
 {
@@ -22,28 +33,23 @@ public:
     TypeId::kAvReaderTypeId,
     GafferImage::ImageNode);
 
-  Gaffer::StringPlug *fileNamePlug();
-  const Gaffer::StringPlug *fileNamePlug() const;
+  PLUG_MEMBER_DECL(fileNamePlug, Gaffer::StringPlug);
 
   // Number of times the node has been refreshed.
-  Gaffer::IntPlug *refreshCountPlug();
-  const Gaffer::IntPlug *refreshCountPlug() const;
+  PLUG_MEMBER_DECL(refreshCountPlug, Gaffer::IntPlug);
 
-#if 0
-  enum class MissingFrameMode : int {
-    kError = 0,
-    kBlack,
-    kHold,
-  };
+  PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
+  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
-  Gaffer::IntPlug *missingFrameModePlug();
-  const Gaffer::IntPlug *missingFrameModePlug() const;
-#endif
+  PLUG_MEMBER_DECL(availableVideoStreamInfoPlug, Gaffer::StringVectorDataPlug);
+  PLUG_MEMBER_DECL(availableVideoStreamIndicesPlug, Gaffer::IntVectorDataPlug);
 
-  Gaffer::IntVectorDataPlug *availableFramesPlug();
-  const Gaffer::IntVectorDataPlug *availableFramesPlug() const;
+  PLUG_MEMBER_DECL(availableFramesPlug, Gaffer::IntVectorDataPlug);
+  PLUG_MEMBER_DECL(fileValidPlug, Gaffer::BoolPlug);
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
+
+  static size_t supportedExtensions(std::vector<std::string> &extensions);
 
 protected:
   void hash(const Gaffer::ValuePlug *output,
@@ -105,15 +111,21 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
-  Gaffer::ObjectVectorPlug *_tileBatchPlug();
-  const Gaffer::ObjectVectorPlug *_tileBatchPlug() const;
+  std::shared_ptr<void> _retrieveDecoder(const Gaffer::Context *context) const;
 
-  std::shared_ptr<void> _retrieveFrame(const Gaffer::Context *context/*, bool holdForBlack = false*/) const;
+  std::shared_ptr<void> _retrieveFrame(
+    const Gaffer::Context *context /*, bool holdForBlack = false*/) const;
+
+  PLUG_MEMBER_DECL(_tileBatchPlug, Gaffer::ObjectVectorPlug);
+
+  void _hashFileName(const Gaffer::Context *context, IECore::MurmurHash &h) const;
 
   void _plugSet(Gaffer::Plug *plug);
 
-  static std::size_t FirstPlugIndex;
+  static size_t FirstPlugIndex;
 };
+
+#undef PLUG_MEMBER_DECL
 
 IE_CORE_DECLAREPTR(AvReader)
 

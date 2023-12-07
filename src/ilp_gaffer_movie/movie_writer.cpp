@@ -43,10 +43,9 @@ MovieWriter::MovieWriter(const std::string &name) : TaskNode(name)
   addChild(new StringPlug("colorspace", Plug::In, "bt709"));
   addChild(new StringPlug("colorPrimaries", Plug::In, "bt709"));
   addChild(new StringPlug("colorTrc", Plug::In, "iec61966-2-1"));
-  addChild(new StringPlug("swsFlags", Plug::In, 
-    "flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"));
   addChild(new StringPlug("filtergraph", Plug::In,
-    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"));
+    "scale=in_range=full:in_color_matrix=bt709:out_range=full:out_color_matrix=bt709"
+    ":flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"));
   addChild(new StringPlug("codec", Plug::In, "prores"));
 
   constexpr auto plug_default = static_cast<unsigned int>(Plug::Default);
@@ -159,33 +158,27 @@ const Gaffer::StringPlug *MovieWriter::colorTrcPlug() const
   return getChild<StringPlug>(FirstPlugIndex + 5);
 }
 
-Gaffer::StringPlug *MovieWriter::swsFlagsPlug() { return getChild<StringPlug>(FirstPlugIndex + 6); }
-const Gaffer::StringPlug *MovieWriter::swsFlagsPlug() const
+Gaffer::StringPlug *MovieWriter::filtergraphPlug()
+{
+  return getChild<StringPlug>(FirstPlugIndex + 6);
+}
+const Gaffer::StringPlug *MovieWriter::filtergraphPlug() const
 {
   return getChild<StringPlug>(FirstPlugIndex + 6);
 }
 
-Gaffer::StringPlug *MovieWriter::filtergraphPlug()
-{
-  return getChild<StringPlug>(FirstPlugIndex + 7);
-}
-const Gaffer::StringPlug *MovieWriter::filtergraphPlug() const
-{
-  return getChild<StringPlug>(FirstPlugIndex + 7);
-}
-
-Gaffer::StringPlug *MovieWriter::codecPlug() { return getChild<StringPlug>(FirstPlugIndex + 8); }
+Gaffer::StringPlug *MovieWriter::codecPlug() { return getChild<StringPlug>(FirstPlugIndex + 7); }
 
 const Gaffer::StringPlug *MovieWriter::codecPlug() const
 {
-  return getChild<StringPlug>(FirstPlugIndex + 8);
+  return getChild<StringPlug>(FirstPlugIndex + 7);
 }
 
-GafferImage::ImagePlug *MovieWriter::outPlug() { return getChild<ImagePlug>(FirstPlugIndex + 9); }
+GafferImage::ImagePlug *MovieWriter::outPlug() { return getChild<ImagePlug>(FirstPlugIndex + 8); }
 
 const GafferImage::ImagePlug *MovieWriter::outPlug() const
 {
-  return getChild<ImagePlug>(FirstPlugIndex + 9);
+  return getChild<ImagePlug>(FirstPlugIndex + 8);
 }
 
 Gaffer::ValuePlug *MovieWriter::codecSettingsPlug(const std::string &codec_name)
@@ -220,18 +213,6 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
   ContextPtr context = new Context(*Context::current());
   Context::Scope scopedContext(context.get());
 
-  const std::string filename = fileNamePlug()->getValue();
-  const std::string color_range = colorRangePlug()->getValue();
-  const std::string colorspace = colorspacePlug()->getValue();
-  const std::string color_primaries = colorPrimariesPlug()->getValue();
-  const std::string color_trc = colorTrcPlug()->getValue();
-  const std::string sws_flags = swsFlagsPlug()->getValue();
-  const std::string filtergraph = filtergraphPlug()->getValue();
-  std::string preset;
-  std::string pix_fmt;
-  std::string tune;
-  std::string x264_params;
-
   // Setup muxer.
   //
   // NOTE(tohi): We cannot set the width and height until we have "seen" the first image.
@@ -263,94 +244,98 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
     IECore::msg(iec_level, "MovieWriter", str);
   });
 
-  bool mux_init = false;
-  ilp_movie::MuxContext mux_ctx = {};
-  mux_ctx.filename = filename.c_str();
-  mux_ctx.fps = static_cast<double>(context->getFramesPerSecond());
-  mux_ctx.mp4_metadata.color_range = color_range.c_str();
-  mux_ctx.mp4_metadata.colorspace = colorspace.c_str();
-  mux_ctx.mp4_metadata.color_primaries = color_primaries.c_str();
-  mux_ctx.mp4_metadata.color_trc = color_trc.c_str();
-  mux_ctx.sws_flags = sws_flags.c_str();
-  mux_ctx.filtergraph = filtergraph.c_str();
+  const auto make_mux_ctx = [&](const int width, const int height) {
+    const auto filename = fileNamePlug()->getValue();
+    const auto frame_rate = static_cast<double>(context->getFramesPerSecond());
 
-  if (codec == "h264") {
-    preset = codec_settings->getChild<StringPlug>("preset")->getValue();
-    pix_fmt = codec_settings->getChild<StringPlug>("pix_fmt")->getValue();
-    tune = codec_settings->getChild<StringPlug>("tune")->getValue();
-    x264_params = codec_settings->getChild<StringPlug>("x264Params")->getValue();
+    // TODO(tohi): H264 only?!
+    const auto color_range = colorRangePlug()->getValue();
+    const auto colorspace = colorspacePlug()->getValue();
+    const auto color_primaries = colorPrimariesPlug()->getValue();
+    const auto color_trc = colorTrcPlug()->getValue();
 
-    ilp_movie::h264::Config cfg = {};
-    cfg.preset = preset.c_str();
-    cfg.pix_fmt = pix_fmt.c_str();
-    if (tune != "none") { mux_ctx.h264.cfg.tune = tune.c_str(); }
-    mux_ctx.h264.cfg.crf = codec_settings->getChild<IntPlug>("crf")->getValue();
-    mux_ctx.h264.cfg.x264_params = x264_params.c_str();
-    //mux_ctx.h264.qp = codec_settings->getChild<IntPlug>("qp")->getValue();
+    ilp_movie::MuxParameters mux_params = {};
+    if (codec == "h264") {
+      const auto pix_fmt = codec_settings->getChild<StringPlug>("pix_fmt")->getValue();
+      const auto preset = codec_settings->getChild<StringPlug>("preset")->getValue();
+      const auto tune = codec_settings->getChild<StringPlug>("tune")->getValue();
+      const auto x264_params = codec_settings->getChild<StringPlug>("x264Params")->getValue();
 
-    mux_ctx.codec_name = "libx264";
-    mux_ctx.h264.cfg = cfg;
-  } else if (codec == "prores") {
-    // clang-format off
-    ilp_movie::ProRes::Config cfg = {};
-    const auto p_str = codec_settings->getChild<StringPlug>("profile")->getValue();
-    if      (p_str == "proxy_10b"sv    ) { cfg = ilp_movie::ProRes::Config::Preset("proxy").value();    }
-    else if (p_str == "lt_10b"sv       ) { cfg = ilp_movie::ProRes::Config::Preset("lt").value();       }
-    else if (p_str == "standard_10b"sv ) { cfg = ilp_movie::ProRes::Config::Preset("standard").value(); }
-    else if (p_str == "hq_10b"sv       ) { cfg = ilp_movie::ProRes::Config::Preset("hq").value();       }
-    else if (p_str == "4444_10b"sv     ) { cfg = ilp_movie::ProRes::Config::Preset("4444").value();     }
-    else if (p_str == "4444xq_10b"sv   ) { cfg = ilp_movie::ProRes::Config::Preset("4444xq").value();   }
-    else { throw IECore::Exception("Bad ProRes profile / pixel format"); }
-    // clang-format on
+      ilp_movie::H264::EncodeParameters enc_params = {};
+      enc_params.pix_fmt = pix_fmt;
+      enc_params.preset = preset;
+      if (tune != "none") { enc_params.tune = tune; }
+      enc_params.crf = codec_settings->getChild<IntPlug>("crf")->getValue();
+      enc_params.x264_params = x264_params;
+      enc_params.color_range = color_range;
+      enc_params.colorspace = colorspace;
+      enc_params.color_primaries = color_primaries;
+      enc_params.color_trc = color_trc;
+      auto mp = ilp_movie::MakeMuxParameters(filename,
+        /*width=*/width,
+        /*height=*/height,
+        /*frame_rate=*/frame_rate,
+        enc_params);
+      if (!mp.has_value()) { throw IECore::Exception("Bad H264 parameters"); }
+      mux_params = std::move(*mp);
+    } else if (codec == "prores") {
+      ilp_movie::ProRes::EncodeParameters enc_params = {};
+      enc_params.qscale = codec_settings->getChild<IntPlug>("qscale")->getValue();
+      // clang-format off
+      const auto p_str = codec_settings->getChild<StringPlug>("profile")->getValue();
+      if      (p_str == "proxy_10b"sv    ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::kProxy;    }
+      else if (p_str == "lt_10b"sv       ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::kLt;       }
+      else if (p_str == "standard_10b"sv ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::kStandard; }
+      else if (p_str == "hq_10b"sv       ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::kHq;       }
+      else if (p_str == "4444_10b"sv     ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::k4444;     }
+      else if (p_str == "4444xq_10b"sv   ) { enc_params.profile_name = ilp_movie::ProRes::ProfileName::k4444xq;   }
+      else { throw IECore::Exception("Bad ProRes profile / pixel format"); }
+      // clang-format on
+      auto mp = ilp_movie::MakeMuxParameters(filename,
+        /*width=*/width,
+        /*height=*/height,
+        /*frame_rate=*/frame_rate,
+        enc_params);
+      if (!mp.has_value()) { throw IECore::Exception("Bad ProRes parameters"); }
+      mux_params = std::move(*mp);
+    } else {
+      throw IECore::Exception("Unsupported codec");
+    }
 
-    cfg.qscale = codec_settings->getChild<IntPlug>("qscale")->getValue();
+    mux_params.filter_graph = filtergraphPlug()->getValue();
 
-    mux_ctx.codec_name = "prores_ks";
-    mux_ctx.pro_res.cfg = cfg;
-  } else {
-    throw IECore::Exception("Unsupported codec");
-  }
+    return ilp_movie::MakeMuxContext(mux_params);
+  };
 
-#if 0
-  mux_ctx.gop_size = 12;
-  mux_ctx.bit_rate = 400000;
-  mux_ctx.frame_rate = 25;
-#endif
-
+  std::unique_ptr<ilp_movie::MuxContext> mux_ctx = nullptr;
   for (const float frame : frames) {
     // IECore::msg(IECore::Msg::Info, "MovieWriterSequential::mux", boost::format("frame: %f") %
     // frame);
     context->setFrame(frame);
     const auto img_ptr = ImageAlgo::image(img);
 
-    if (!mux_init) {
-      mux_ctx.width = img_ptr->getDisplayWindow().size().x + 1;
-      mux_ctx.height = img_ptr->getDisplayWindow().size().y + 1;
-      if (!MuxInit(&mux_ctx)) { throw IECore::Exception("Mux init failed"); }
-      mux_init = true;
+    if (mux_ctx == nullptr) {
+      mux_ctx = make_mux_ctx(/*width=*/img_ptr->getDisplayWindow().size().x + 1,
+        /*height=*/img_ptr->getDisplayWindow().size().y + 1);
+      if (mux_ctx == nullptr) { throw IECore::Exception("Mux init failed"); }
     }
 
     // TODO(tohi): Only send pixels in display window?
 
     // Pass a frame to the muxer.
     ilp_movie::MuxFrame mux_frame = {};
-    mux_frame.width = mux_ctx.width;
-    mux_frame.height = mux_ctx.height;
+    mux_frame.width = mux_ctx->params.width;
+    mux_frame.height = mux_ctx->params.height;
     mux_frame.frame_nb = frame;
     mux_frame.r = img_ptr->getChannel<float>("R")->readable().data();
     mux_frame.g = img_ptr->getChannel<float>("G")->readable().data();
     mux_frame.b = img_ptr->getChannel<float>("B")->readable().data();
-    if (!MuxWriteFrame(mux_ctx, mux_frame)) {
-      MuxFree(&mux_ctx);
+    if (!ilp_movie::MuxWriteFrame(*mux_ctx, mux_frame)) {
       throw IECore::Exception("Mux write frame failed");
     }
   }
 
-  if (!MuxFinish(mux_ctx)) {
-    MuxFree(&mux_ctx);
-    throw IECore::Exception("Mux finish failed");
-  }
-  MuxFree(&mux_ctx);
+  if (!ilp_movie::MuxFinish(*mux_ctx)) { throw IECore::Exception("Mux finish failed"); }
 
 #if 0
     ConstCompoundDataPtr sets;

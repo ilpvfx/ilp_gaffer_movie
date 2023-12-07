@@ -98,7 +98,11 @@ static void IlpMovieAvLogCallback(void *ptr, int level, const char *fmt, va_list
 namespace {
 struct AvLogCallbackInstaller
 {
-  AvLogCallbackInstaller() noexcept { av_log_set_callback(IlpMovieAvLogCallback); }
+  AvLogCallbackInstaller() noexcept
+  {
+    av_log_set_flags(AV_LOG_SKIP_REPEATED);
+    av_log_set_callback(IlpMovieAvLogCallback);
+  }
 };
 }// namespace
 static AvLogCallbackInstaller _dummy;

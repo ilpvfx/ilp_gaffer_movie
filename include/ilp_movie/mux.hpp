@@ -41,124 +41,125 @@
 #pragma once
 
 #include <functional>// std::function
-#include <optional>
+#include <memory>// std::unique_ptr
+#include <optional>// std::optional
 #include <string_view>// std::string_view
 
-#include <ilp_movie/ilp_movie_export.hpp>
+#include <ilp_movie/color.hpp>
+#include <ilp_movie/ilp_movie_export.hpp>// ILP_MOVIE_EXPORT
 
 namespace ilp_movie {
 
 namespace ProRes {
+  namespace ProfileName {
+    // clang-format off
+    constexpr auto kProxy    = std::string_view{"proxy"};
+    constexpr auto kLt       = std::string_view{"lt"};
+    constexpr auto kStandard = std::string_view{"standard"};
+    constexpr auto kHq       = std::string_view{"hq"};
+    constexpr auto k4444     = std::string_view{"4444"};
+    constexpr auto k4444xq   = std::string_view{"4444xq"};
+    // clang-format on
+  }// namespace ProfileName
 
-  struct Config
+  struct EncodeParameters
   {
-    [[nodiscard]] static constexpr auto Preset(const std::string_view name,
-      const bool alpha = false) noexcept -> std::optional<Config>
-    {
-      Config cfg = {};
-
-      // 4:2:2 profiles (no alpha support).
-      if (name == "proxy") {
-        if (alpha) { return std::nullopt; }
-        cfg.name = "proxy";
-        cfg.profile = 0;
-        cfg.pix_fmt = "yuv422p10le";
-      } else if (name == "lt") {
-        if (alpha) { return std::nullopt; }
-        cfg.name = "lt";
-        cfg.profile = 1;
-        cfg.pix_fmt = "yuv422p10le";
-      } else if (name == "standard") {
-        if (alpha) { return std::nullopt; }
-        cfg.name = "standard";
-        cfg.profile = 2;
-        cfg.pix_fmt = "yuv422p10le";
-      } else if (name == "hq") {
-        if (alpha) { return std::nullopt; }
-        cfg.name = "hq";
-        cfg.profile = 3;
-        cfg.pix_fmt = "yuv422p10le";
-      }
-      // 4:4:4 profiles (optional alpha).
-      else if (name == "4444") {
-        cfg.name = "4444";
-        cfg.profile = 4;
-        cfg.pix_fmt = alpha ? "yuva444p10le" : "yuv444p10le";
-      } else if (name == "4444xq") {
-        cfg.name = "4444xq";
-        cfg.profile = 5;
-        cfg.pix_fmt = alpha ? "yuva444p10le" : "yuv444p10le";
-      }
-      // Unrecognized profile name.
-      else {
-        return std::nullopt;
-      }
-
-      return cfg;
-    }
-
-    // The basic difference is the bitrates...
-    const char *name = "hq";
-    int profile = 3;
-
-    // Supported pixel formats (depending on profile).
-    // NOTE: We are only considering 10-bit pixel formats for now.
-    const char *pix_fmt = "yuv422p10le";
-
-    // Values between 9 - 13 give a good results.
-    // Lower value gives higher quality, but larger file size.
+    std::string_view profile_name = ProfileName::kHq;
     int qscale = 11;
+    bool alpha = false;
+    std::string_view color_range = ColorRange::kPc;
+    std::string_view color_primaries = ColorPrimaries::kBt709;
+    std::string_view colorspace = Colorspace::kBt709;
+    std::string_view color_trc = ColorTrc::kIec61966_2_1;
 
-    // Tricks QuickTime and Final Cut Pro into thinking that the movie was generated using a
-    // QuickTime ProRes encoder.
-    const char *vendor = "apl0";
+    // https://ffmpeg.org/ffmpeg-codecs.html#ProRes
+#if 0
+    // Select quantization matrix.
+    // 0: ‘auto’
+    // 1: ‘default’
+    // 2: ‘proxy’
+    // 3: ‘lt’
+    // 4: ‘standard’
+    // 5: ‘hq’
+    //
+    // If set to auto, the matrix matching the profile will be picked. If not set, the matrix
+    // providing the highest quality, default, will be picked.
+    int quant_mat = 0;
+
+    // How many bits to allot for coding one macroblock. Different profiles use between 200 and
+    // 2400 bits per macroblock, the maximum is 8000.
+    int bits_per_mb;
+
+    // Number of macroblocks in each slice (1-8); the default value (8) should be good in almost all
+    // situations.
+    int mbs_per_slice = 8;
+
+    // Override the 4-byte vendor ID. A custom vendor ID like "apl0" would claim the stream was
+    // produced by the Apple encoder.
+    std::string_view vendor = std::string_view{ "apl0" };
+
+    // Specify number of bits for alpha component. Possible values are 0, 8 and 16. Use 0 to disable
+    // alpha plane coding.
+    int alpha_bits = 0
+#endif
   };
-
 }// namespace ProRes
 
-namespace h264 {
+namespace H264 {
+  // Supported pixel formats.
+  namespace PixelFormat {
+    // clang-format off
+    constexpr auto kYuv420p   = std::string_view{"yuv420p"};
+    constexpr auto kYuv420p10 = std::string_view{"yuv420p10"};
+    constexpr auto kYuv422p   = std::string_view{"yuv422p"};
+    constexpr auto kYuv422p10 = std::string_view{"yuv422p10"};
+    constexpr auto kYuv444p   = std::string_view{"yuv444p"};
+    constexpr auto kYuv444p10 = std::string_view{"yuv444p10"};
+    // clang-format on
+  }// namespace PixelFormat
 
   // The available presets in descending order of speed are:
   namespace Preset {
     // clang-format off
-    constexpr const char *kUltrafast = "ultrafast";
-    constexpr const char *kSuperfast = "superfast";
-    constexpr const char *kVeryfast  = "veryfast";
-    constexpr const char *kFaster    = "faster";
-    constexpr const char *kFast      = "fast";
-    constexpr const char *kMedium    = "medium";
-    constexpr const char *kSlow      = "slow";
-    constexpr const char *kSlower    = "slower";
-    constexpr const char *kVeryslow  = "veryslow";
+    constexpr auto kUltrafast = std::string_view{"ultrafast"};
+    constexpr auto kSuperfast = std::string_view{"superfast"};
+    constexpr auto kVeryfast  = std::string_view{"veryfast"};
+    constexpr auto kFaster    = std::string_view{"faster"};
+    constexpr auto kFast      = std::string_view{"fast"};
+    constexpr auto kMedium    = std::string_view{"medium"};
+    constexpr auto kSlow      = std::string_view{"slow"};
+    constexpr auto kSlower    = std::string_view{"slower"};
+    constexpr auto kVeryslow  = std::string_view{"veryslow"};
     // clang-format on
   }// namespace Preset
-
-  // Supported pixel formats.
-  namespace PixelFormat {
-    // clang-format off
-    constexpr const char *kYuv420p   = "yuv420p";
-    constexpr const char *kYuv420p10 = "yuv420p10";
-    constexpr const char *kYuv422p   = "yuv422p";
-    constexpr const char *kYuv422p10 = "yuv422p10";
-    constexpr const char *kYuv444p   = "yuv444p";
-    constexpr const char *kYuv444p10 = "yuv444p10";
-    // clang-format on
-  }// namespace PixelFormat
 
   // Optional tune settings.
   namespace Tune {
     // clang-format off
-    constexpr const char *kNone        = nullptr;
-    constexpr const char *kFilm        = "film";
-    constexpr const char *kAnimation   = "animation";
-    constexpr const char *kGrain       = "grain";
-    constexpr const char *kStillimage  = "stillimage";
-    constexpr const char *kFastdecode  = "fastdecode";
-    constexpr const char *kZerolatency = "zerolatency";
+    constexpr auto kNone        = std::string_view{"__none__"};
+    constexpr auto kFilm        = std::string_view{"film"};
+    constexpr auto kAnimation   = std::string_view{"animation"};
+    constexpr auto kGrain       = std::string_view{"grain"};
+    constexpr auto kStillimage  = std::string_view{"stillimage"};
+    constexpr auto kFastdecode  = std::string_view{"fastdecode"};
+    constexpr auto kZerolatency = std::string_view{"zerolatency"};
     // clang-format on
   }// namespace Tune
 
+  struct EncodeParameters
+  {
+    std::string_view pix_fmt = PixelFormat::kYuv420p;
+    std::string_view preset = Preset::kSlower;
+    std::string_view tune = Tune::kNone;
+    std::string_view x264_params = std::string_view{ "keyint=15:no-deblock=1" };
+    int crf = 23;
+    std::string_view color_range = ColorRange::kPc;
+    std::string_view color_primaries = ColorPrimaries::kBt709;
+    std::string_view colorspace = Colorspace::kBt709;
+    std::string_view color_trc = ColorTrc::kIec61966_2_1;
+  };
 
+#if 0
   struct Config
   {
 // NOTE(tohi): Setting pixel format seems to automatically select
@@ -183,7 +184,7 @@ namespace h264 {
     // Constant rate factor.
     // Should be in range [0, 51], where lower values result
     // in higher quality but larger files, and vice versa.
-    // For x642 sane values are in the range [18, 28].
+    // For x264 sane values are in the range [18, 28].
     // A change of +/-6 should result in about half/double the file size, but this is
     // just an estimate.
     // Choose the highest CRF value that still provides an acceptable quality. If the output looks
@@ -201,13 +202,94 @@ namespace h264 {
 
     const char *x264_params = "keyint=15:no-deblock=1";
   };
+#endif
 
-}// namespace h264
+}// namespace H264
 
 struct MuxImpl;
+using mux_impl_ptr = std::unique_ptr<MuxImpl, std::function<void(MuxImpl *)>>;
 
-//
-struct MuxContext
+struct MuxParameters
+{
+  // The filename cannot be empty.
+  std::string filename;
+
+  // Pixel resolution dimensions.
+  int width = -1;
+  int height = -1;
+
+  // Frames per second (FPS).
+  double frame_rate = -1.0;
+
+  // Specifies the codec to use for the video stream.
+  std::string codec_name;
+
+  std::string pix_fmt;
+
+  // MP4 metadata.
+  std::string color_range;
+  std::string color_primaries;
+  std::string colorspace;
+  std::string color_trc;
+
+  std::string filter_graph;
+
+  // ===============
+  // H.264 parameters.
+  // ===============
+  // NOTE(tohi): Setting pixel format seems to automatically select
+  //             the appropriate profile, so we don't set the profile
+  //             explicitly.
+#if 0 
+  // Typically not used according to docs, leave empty to use default.
+  // Supported profiles:
+  //   "baseline"
+  //   "main"
+  //   "high"
+  //   "high10"  (first 10-bit compatible profile)
+  //   "high422" (supports yuv420p, yuv422p, yuv420p10le and yuv422p10le)
+  //   "high444" (supports as above, as well as yuv444p and yuv444p10le)
+  std::string profile;
+#endif
+
+  std::string preset;
+  std::string tune;
+  std::string x264_params;
+
+  // Constant rate factor.
+  // Should be in range [0, 51], where lower values result
+  // in higher quality but larger files, and vice versa.
+  // For x264 sane values are in the range [18, 28].
+  // A change of +/-6 should result in about half/double the file size, but this is
+  // just an estimate.
+  // Choose the highest CRF value that still provides an acceptable quality. If the output looks
+  // good, then try a higher value. If it looks bad, choose a lower value.
+  //
+  // See: https://slhck.info/video/2017/02/24/crf-guide.html
+  //
+  // NOTE(tohi): I've seen mixed reports on using the following parameters:
+  //
+  // int qp = 23;
+  // int qscale = 9;
+  //
+  // but only using CRF seems to be the way to go, for now.
+  int crf = -1;
+
+  // ===============
+  // ProRes parameters.
+  // ===============
+
+  int profile = -1;
+
+  // Values between 9 - 13 give a good results.
+  // Lower value gives higher quality, but larger file size.
+  int qscale = -1;
+
+  std::string vendor;
+};
+
+#if 0
+struct MuxParameters
 {
   // The filename cannot be null.
   // If format_name is null the output format is guessed according to the file extension.
@@ -251,11 +333,20 @@ struct MuxContext
   {
     h264::Config cfg = {};
   } h264 = {};
+};
+#endif
+
+//
+struct MuxContext
+{
+  // A copy of the parameters used to create the context.
+  MuxParameters params = {};
 
   // Private implementation specific data stored as an opaque pointer.
   // The implementation specific data contains low-level resources such as
-  // format context, codecs, etc.
-  MuxImpl *impl = nullptr;
+  // format context, codecs, etc. The resources are automatically freed when this
+  // context is destroyed.
+  mux_impl_ptr impl = nullptr;
 };
 
 // Describes how pixel data is passed to the muxer.
@@ -272,17 +363,24 @@ struct MuxFrame
   const float *r = nullptr;
   const float *g = nullptr;
   const float *b = nullptr;
+  const float *a = nullptr;
 };
 
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxParameters(std::string_view filename,
+  int width,
+  int height,
+  double frame_rate,
+  const ProRes::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>;
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxParameters(std::string_view filename,
+  int width,
+  int height,
+  double frame_rate,
+  const H264::EncodeParameters &enc_params) noexcept -> std::optional<MuxParameters>;
+
 // Initialize the internal resources required to start encoding video frames.
-//
-// If true is returned, it is possible to start sending frames to the muxer using the
-// MuxWriteFrame{} function. At some later point when all frames have been written the internal
-// resources must be free'd by calling MuxFree{}.
-//
-// If false is returned, the internal resources could not be allocated. The mux context will be
-// unusable. There is no need to call MuxFree{} in this case.
-[[nodiscard]] ILP_MOVIE_EXPORT auto MuxInit(MuxContext *mux_ctx) noexcept -> bool;
+[[nodiscard]] ILP_MOVIE_EXPORT auto MakeMuxContext(const MuxParameters &params) noexcept
+  -> std::unique_ptr<MuxContext>;
 
 // Send a frame to the MuxContext encoder. The pixel data interface is determined by the MuxFrame
 // struct.
@@ -298,16 +396,6 @@ struct MuxFrame
 // Finalize the file by flushing streams and possibly performing other operations.
 //
 // Returns true if successful, otherwise false.
-// Note that the MuxContext must be manually free'd using MuxFreeImpl{} regardless of success.
 [[nodiscard]] ILP_MOVIE_EXPORT auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool;
-
-// Free the resources allocated by the implementation in MuxInit{}. The implementation pointer will
-// be set to null.
-//
-// MUST be called _before_ MuxContext is destroyed.
-//
-// Note: Only MuxContext instances that have been passed to a successful MuxInit{} call need to free
-// their implementations.
-ILP_MOVIE_EXPORT void MuxFree(MuxContext *mux_ctx) noexcept;
 
 }// namespace ilp_movie

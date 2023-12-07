@@ -2,6 +2,9 @@
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # NOTE(tohi): Only for executable...
 # ----- 
 #
@@ -22,6 +25,7 @@ target_link_libraries(mux_test
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
           ilp_gaffer_movie::ilp_gaffer_movie_options
           ilp_movie::ilp_movie
+          Threads::Threads
           Catch2::Catch2WithMain)
 
 # Automatically discover tests that are defined in catch based test files you can modify the unittests. Set TEST_PREFIX
@@ -39,25 +43,26 @@ catch_discover_tests(
   OUTPUT_SUFFIX
   .xml)
 
-add_executable(demux_test demux_test.cpp)
-target_link_libraries(demux_test 
+add_executable(decoder_test decoder_test.cpp)
+target_link_libraries(decoder_test 
   PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
           ilp_gaffer_movie::ilp_gaffer_movie_options
           ilp_movie::ilp_movie
+          Threads::Threads
           Catch2::Catch2WithMain)
 
 # Automatically discover tests that are defined in catch based test files you can modify the unittests. Set TEST_PREFIX
 # to whatever you want, or use different for different binaries.
 catch_discover_tests(
-  demux_test 
+  decoder_test 
   TEST_PREFIX
-  "demux_test."
+  "decoder_test."
   REPORTER
   XML
   OUTPUT_DIR
   .
   OUTPUT_PREFIX
-  "demux_test."
+  "decoder_test."
   OUTPUT_SUFFIX
   .xml)
   
