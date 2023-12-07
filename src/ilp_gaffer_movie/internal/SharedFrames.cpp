@@ -50,36 +50,11 @@ FrameLRUCache &cache()
         return result;
       }
       return result;
-
-#if 0
-      if (key.decoder == nullptr) {
-        result.error = std::make_shared<std::string>("Bad decoder");
-        return result;
-      }
-
-      if (!key.decoder->IsOpen()) {
-        result.error = std::make_shared<std::string>("Decoder not open");
-        return result;
-      }
-
-      try {
-        auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
-        if (!key.decoder->DecodeVideoFrame(key.video_stream_index, key.frame_nb, /*out*/ *dvf)) {
-          result.error = std::make_shared<std::string>("Cannot seek to frame");
-          return result;
-        }
-        result.frame.reset(dvf.release());// NOLINT
-      } catch (std::exception &) {
-        result.error = std::make_shared<std::string>("Cannot initialize decoder");
-        return result;
-      }
-      return result;
-#endif
     },
     /*maxCost=*/200
   };
   return cache;
-}// namespace
+}
 
 }// namespace
 
@@ -89,10 +64,11 @@ bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
 {
   // clang-format off
   return 
-    //lhs.decoder == rhs.decoder && 
     lhs.decoder_key.fileName == rhs.decoder_key.fileName && 
-    lhs.decoder_key.filterGraphDescr.filter_descr == rhs.decoder_key.filterGraphDescr.filter_descr && 
-    lhs.decoder_key.filterGraphDescr.out_pix_fmt_name == rhs.decoder_key.filterGraphDescr.out_pix_fmt_name &&
+    lhs.decoder_key.filterGraphDescr.filter_descr == 
+        rhs.decoder_key.filterGraphDescr.filter_descr && 
+    lhs.decoder_key.filterGraphDescr.out_pix_fmt_name == 
+        rhs.decoder_key.filterGraphDescr.out_pix_fmt_name &&
     lhs.video_stream_index == rhs.video_stream_index && 
     lhs.frame_nb == rhs.frame_nb;
   // clang-format on
@@ -101,7 +77,6 @@ bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0;
-  // boost::hash_combine(seed, k.decoder);
   boost::hash_combine(seed, k.decoder_key.fileName);
   boost::hash_combine(seed, k.decoder_key.filterGraphDescr.filter_descr);
   boost::hash_combine(seed, k.decoder_key.filterGraphDescr.out_pix_fmt_name);

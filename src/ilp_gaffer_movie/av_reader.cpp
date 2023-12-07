@@ -22,13 +22,7 @@
 #include <Gaffer/Context.h>
 #include <Gaffer/StringPlug.h>
 
-// namespace {
-// struct FrameCacheKey;
-// inline std::size_t hash_value(const FrameCacheKey &k);
-// }// namespace
-
 #include <boost/bind/bind.hpp>
-#include <boost/functional/hash.hpp>
 
 #include <ilp_movie/decoder.hpp>
 #include <ilp_movie/log.hpp>
@@ -37,94 +31,6 @@
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::AvReader);
 
 static const IECore::InternedString kTileBatchIndexContextName("__tileBatchIndex");
-
-namespace {
-
-#if 0
-// For success, frame should be set, and error left null.
-// For failure, frame should be left null, and error should be set.
-struct FrameCacheEntry
-{
-  std::shared_ptr<ilp_movie::DecodedVideoFrame> frame;
-  std::shared_ptr<std::string> error;
-};
-
-struct FrameCacheKey
-{
-  ilp_movie::Decoder *decoder = nullptr;
-  int video_stream_index = -1;
-  int frame_nb = -1;
-};
-
-constexpr bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
-{
-  // clang-format off
-  return 
-    lhs.decoder == rhs.decoder && 
-    lhs.video_stream_index == rhs.video_stream_index && 
-    lhs.frame_nb == rhs.frame_nb;
-  // clang-format on
-}
-
-std::size_t hash_value(const FrameCacheKey &k)
-{
-#if 0
-  std::size_t seed = 0U;
-  // boost::hash_combine(seed, reinterpret_cast<std::uintptr_t>(k.decoder));// NOLINT
-  boost::hash_combine(seed, k.decoder);// NOLINT
-  boost::hash_combine(seed, k.video_stream_index);// NOLINT
-  boost::hash_combine(seed, k.frame_nb);// NOLINT
-  return seed;
-#else
-  std::size_t seed = 0U;
-  boost::hash_combine(seed, k.frame_nb);// NOLINT
-  return seed;
-#endif
-}
-
-FrameCacheEntry
-  frameCacheGetter(const FrameCacheKey &key, size_t &cost, const IECore::Canceller * /*canceller*/)
-{
-  IlpGafferMovie::TRACE("AvReader", "frameCacheGetter");
-
-  cost = 1U;
-
-  FrameCacheEntry result = {};
-
-  if (key.decoder == nullptr) {
-    result.error = std::make_shared<std::string>("AvReader : Bad decoder");
-    return result;
-  }
-
-  if (!key.decoder->IsOpen()) {
-    result.error = std::make_shared<std::string>("AvReader : Decoder not open");
-    return result;
-  }
-
-  try {
-    auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
-    if (!key.decoder->DecodeVideoFrame(key.video_stream_index, key.frame_nb, /*out*/ *dvf)) {
-      result.error = std::make_shared<std::string>("AvReader : Cannot seek to frame");
-      return result;
-    }
-    result.frame.reset(dvf.release());// NOLINT
-  } catch (std::exception &) {
-    result.error = std::make_shared<std::string>("AvReader : Cannot initialize decoder");
-    return result;
-  }
-  return result;
-}
-
-using FrameCache = IECorePreview::LRUCache<FrameCacheKey, FrameCacheEntry>;
-
-FrameCache *frameCache()
-{
-  static auto *c = new FrameCache(frameCacheGetter, /*maxCost=*/200);
-  return c;
-}
-#endif
-
-}// namespace
 
 #if 0
 // This function transforms an input region to account for the display window being flipped.
@@ -281,7 +187,7 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
     // clang-format on
     TRACE("AvReader", "hash - fileValid | availableVideoStreamInfo | availableVideoStreamIndices");
 
-    fileNamePlug()->hash(h);
+    fileNamePlug()->hash(/*out*/ h);
     refreshCountPlug()->hash(h);
   } else if (output == availableFramesPlug()) {
     TRACE("AvReader", "hash - availableFrames");
@@ -485,12 +391,15 @@ void AvReader::hashFormat(const GafferImage::ImagePlug *parent,
   // We don't need to depend on the current frame here, since we rely on the stream
   // headers to provide the format for a given video stream index.
 
-  ImageNode::hashFormat(parent, context, h);
-  fileNamePlug()->hash(h);
-  refreshCountPlug()->hash(h);
-  videoStreamIndexPlug()->hash(h);
+  ImageNode::hashFormat(parent, context, /*out*/ h);
+  fileNamePlug()->hash(/*out*/ h);
+  refreshCountPlug()->hash(/*out*/ h);
+  videoStreamIndexPlug()->hash(/*out*/ h);
+  filterGraphPlug()->hash(/*out*/ h);
 
   // missingFrameModePlug()->hash(h);
+
+  // Check if defaults have changed.
   const auto format = GafferImage::FormatPlug::getDefaultFormat(context);
   h.append(format.getDisplayWindow());
   h.append(format.getPixelAspect());
@@ -894,22 +803,11 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context * /*conte
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   bool holdForBlack = false*/) const
 {
-#if 1
   TRACE("AvReader",
     (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
-
-  // const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
-  // if (decoder == nullptr) { return nullptr; }
-  // if (!decoder->IsOpen()) { return nullptr; }
-
-  // int video_stream_index = videoStreamIndexPlug()->getValue();
-  // if (video_stream_index < 0) {
-  //   video_stream_index = decoder->BestVideoStreamIndex();
-  //   if (video_stream_index < 0) { return nullptr; }
-  // }
 
   // clang-format off
   const auto frameEntry = shared_frames_internal::SharedFrames::get(
@@ -931,20 +829,6 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
   TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
-#else
-  const auto *p = videoStreamIndexPlug();
-  if (p == nullptr) { return nullptr; }
-  if (context == nullptr) { return nullptr; }
-  auto *fc = frameCache();
-  if (fc == nullptr) { return nullptr; }
-
-  FrameCacheKey key{};
-  key.decoder = nullptr;// decoder.get();
-  key.video_stream_index = p->getValue();
-  key.frame_nb = static_cast<int>(context->getFrame());
-  FrameCacheEntry frameEntry = fc->get(key);
-  return nullptr;
-#endif
 
 #if 0
   MissingFrameMode mode = (MissingFrameMode)missingFrameModePlug()->getValue();
@@ -997,11 +881,10 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
 void AvReader::_plugSet(Gaffer::Plug *plug)
 {
-  // This clears the cache every time the refresh
-  // count is updated, so you don't get entries from
-  // old files hanging around.
+  // This clears the cache every time the refresh count is updated, so you don't get 
+  // entries from old files hanging around.
   if (plug == refreshCountPlug()) {
-    TRACE("AvReader", "refreshCount");
+    TRACE("AvReader::_plugSet", "refreshCount");
 
     // NOTE(tohi): Clears decoders and frames for ALL AvReader nodes...
     shared_frames_internal::SharedFrames::clear();
