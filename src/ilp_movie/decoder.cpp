@@ -466,6 +466,11 @@ public:
     assert(stream != nullptr);// NOLINT
     assert(filter_graph != nullptr);// NOLINT
 
+    // Check if frame exists in stream.
+    if (!(1 <= frame_nb && frame_nb <= stream->FrameCount())) {
+      return false;
+    }
+
     const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
     constexpr int kSeekFlags = AVSEEK_FLAG_BACKWARD;

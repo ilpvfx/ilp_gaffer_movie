@@ -39,6 +39,16 @@ public:
     TypeId::kMovieReaderTypeId,
     GafferImage::ImageNode)
 
+  // The MissingFrameMode controls how to handle missing images.
+  // It is distinct from AvReader::MissingFrameMode so
+  // that we can provide alternate modes using higher
+  // level approaches in the future (e.g interpolation).
+  enum MissingFrameMode {
+    Error = 0,
+    Black,
+    Hold,
+  };
+
   // The FrameMaskMode controls how to handle images
   // outside of the values provided by the start
   // and end frame masks.
@@ -54,6 +64,8 @@ public:
 
   // Number of times the node has been refreshed.
   PLUG_MEMBER_DECL(refreshCountPlug, Gaffer::IntPlug);
+
+  PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
 
   PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
   PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);

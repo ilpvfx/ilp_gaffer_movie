@@ -63,6 +63,6 @@ def defaultColorSpace( fileName, fileFormat, dataType, metadata, config ) :
 	else :
 		return s[dataType]
 
+
 IlpGafferMovie.MovieReader.setDefaultColorSpaceFunction( defaultColorSpace )
 # IlpGafferMovie.MovieWriter.setDefaultColorSpaceFunction( defaultColorSpace )
-

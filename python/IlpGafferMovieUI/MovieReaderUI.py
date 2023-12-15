@@ -55,33 +55,24 @@ Gaffer.Metadata.registerNode(
 
 		],
 
-		"videoStreamIndex" : [
+		"missingFrameMode" : [
 
 			"description",
 			"""
-			The index of the video stream to be read. 
+			Determines how missing frames are handled (e.g. when the 
+			requested frame is outside the movie range).
+			The default behaviour is to throw an exception, but it
+			can also hold the last valid frame, or return a black image 
+			which matches the data window and display window of the 
+			previous valid frame.
 			""",
-			#"presetNames", lambda plug : IECore.StringVectorData( [ str(x) for x in plug.node()["__avReader"]["availableStreamInfo"].getValue() ] ),
-			"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
-			"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
 
-			# "presetNames", IECore.StringVectorData( [ "best (stream #0)", "stream #0", "stream #1" ] ),
-			# "presetValues", IECore.IntVectorData( [ 0, 0, 1] ),
+			"preset:Error", IlpGafferMovie.MovieReader.MissingFrameMode.Error,
+			"preset:Black", IlpGafferMovie.MovieReader.MissingFrameMode.Black,
+			"preset:Hold", IlpGafferMovie.MovieReader.MissingFrameMode.Hold,
 
-			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
 			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
 
-		],
-
-		"filterGraph" : [
-
-			"description",
-			"""
-			The filter graph applied to the decoded frames.\n
-			FFmpeg command-line equivalent of '-vf'.
-			""",
-
-			"label", "Filter Graph",
 		],
 
 		"start" : [
@@ -180,6 +171,35 @@ Gaffer.Metadata.registerNode(
 			"layout:label", "",
 			"layout:activator", "modeIsNotNone",
 
+		],
+
+		"videoStreamIndex" : [
+
+			"description",
+			"""
+			The index of the video stream to be read. 
+			""",
+			#"presetNames", lambda plug : IECore.StringVectorData( [ str(x) for x in plug.node()["__avReader"]["availableStreamInfo"].getValue() ] ),
+			"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
+			"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
+
+			# "presetNames", IECore.StringVectorData( [ "best (stream #0)", "stream #0", "stream #1" ] ),
+			# "presetValues", IECore.IntVectorData( [ 0, 0, 1] ),
+
+			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
+			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
+
+		],
+
+		"filterGraph" : [
+
+			"description",
+			"""
+			The filter graph applied to the decoded frames.\n
+			FFmpeg command-line equivalent of '-vf'.
+			""",
+
+			"label", "Filter Graph",
 		],
 
 		"colorSpace" : [

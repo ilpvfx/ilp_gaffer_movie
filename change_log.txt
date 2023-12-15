@@ -1,0 +1,14 @@
+ILP Gaffer Movie History
+========================
+
+Version 0.1.0
+    ilp_movie (backend)
+    - Rudimentary muxing (encoding) capabilities. Currently supports H264 and ProRes encoders.
+    - Rudimentary demuxing (decoding) capabilites. Supports frame seeking, although not well tested.
+
+    IlpGafferMovie
+    - MovieWriter node that supports encoding a frame range in Gaffer to a movie file.
+    - MovieReader node that supports decoding frames from a movie file and showing those 
+      frames as images in Gaffer. No support for selecting video stream or fixing various 
+      color space issues.
+

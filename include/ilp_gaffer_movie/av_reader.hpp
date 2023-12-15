@@ -33,6 +33,12 @@ public:
     TypeId::kAvReaderTypeId,
     GafferImage::ImageNode);
 
+  enum MissingFrameMode {
+    Error = 0,
+    Black,
+    Hold,
+  };
+
   PLUG_MEMBER_DECL(fileNamePlug, Gaffer::StringPlug);
 
   // Number of times the node has been refreshed.
@@ -40,6 +46,8 @@ public:
 
   PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
   PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
+
+  PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
 
   PLUG_MEMBER_DECL(availableVideoStreamInfoPlug, Gaffer::StringVectorDataPlug);
   PLUG_MEMBER_DECL(availableVideoStreamIndicesPlug, Gaffer::IntVectorDataPlug);
@@ -116,13 +124,13 @@ private:
   std::shared_ptr<void> _retrieveFrame(
     const Gaffer::Context *context /*, bool holdForBlack = false*/) const;
 
-  PLUG_MEMBER_DECL(_tileBatchPlug, Gaffer::ObjectVectorPlug);
+  //PLUG_MEMBER_DECL(_tileBatchPlug, Gaffer::ObjectVectorPlug);
 
   void _hashFileName(const Gaffer::Context *context, IECore::MurmurHash &h) const;
 
   void _plugSet(Gaffer::Plug *plug);
 
-  static size_t FirstPlugIndex;
+  static size_t g_firstPlugIndex;
 };
 
 #undef PLUG_MEMBER_DECL

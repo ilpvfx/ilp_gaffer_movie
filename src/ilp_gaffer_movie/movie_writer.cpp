@@ -216,34 +216,6 @@ void MovieWriter::executeSequence(const std::vector<float> &frames) const
   // Setup muxer.
   //
   // NOTE(tohi): We cannot set the width and height until we have "seen" the first image.
-  ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
-  ilp_movie::SetLogCallback([](int level, const char *s) {
-    auto iec_level = IECore::MessageHandler::Level::Invalid;
-    // clang-format off
-    switch (level) {
-    case ilp_movie::LogLevel::kPanic:
-    case ilp_movie::LogLevel::kFatal:
-    case ilp_movie::LogLevel::kError:
-      iec_level = IECore::MessageHandler::Level::Error; break;
-    case ilp_movie::LogLevel::kWarning:
-      iec_level = IECore::MessageHandler::Level::Warning; break;
-    case ilp_movie::LogLevel::kInfo:
-    case ilp_movie::LogLevel::kVerbose:
-    case ilp_movie::LogLevel::kDebug:
-    case ilp_movie::LogLevel::kTrace:
-      iec_level = IECore::MessageHandler::Level::Info; break;
-    case ilp_movie::LogLevel::kQuiet: // ???
-    default: 
-      break;
-    }
-    // clang-format on
-
-    // Remove trailing newline character since the IECore logger will add one.
-    auto str = std::string{ s };
-    if (!str.empty() && str[str.length() - 1] == '\n') { str.erase(str.length() - 1); }
-    IECore::msg(iec_level, "MovieWriter", str);
-  });
-
   const auto make_mux_ctx = [&](const int width, const int height) {
     const auto filename = fileNamePlug()->getValue();
     const auto frame_rate = static_cast<double>(context->getFramesPerSecond());
