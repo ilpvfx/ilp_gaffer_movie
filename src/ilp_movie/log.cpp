@@ -89,6 +89,7 @@ static void IlpMovieAvLogCallback(void *ptr, int level, const char *fmt, va_list
   } else if (!(ret < kLineSize)) {
     IlpLogCallback(ilp_movie::LogLevel::kError,
       BuildMessage(ilp_movie::LogLevel::kError, "Truncated log message\n").c_str());
+    return;
   }
 
   // Send raw message from libav to callback, don't add any decorations.
@@ -100,7 +101,7 @@ struct AvLogCallbackInstaller
 {
   AvLogCallbackInstaller() noexcept
   {
-    av_log_set_flags(AV_LOG_SKIP_REPEATED);
+    av_log_set_flags(AV_LOG_SKIP_REPEATED | AV_LOG_PRINT_LEVEL);// NOLINT
     av_log_set_callback(IlpMovieAvLogCallback);
   }
 };

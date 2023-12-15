@@ -25,6 +25,16 @@ DecoderLRUCache &cache()
         return result;
       }
 
+      if (decoder->VideoStreamHeaders().empty()) {
+        result.error = std::make_shared<std::string>("No video streams in decoder");
+        return result;
+      }
+
+      if (decoder->BestVideoStreamIndex() < 0) {
+        result.error = std::make_shared<std::string>("Missing 'best' video stream in decoder");
+        return result;
+      }
+
       // Only store decoder if we were able to open it.
       // Note that it might still be the case that the decoder cannot find any
       // input video streams in the file.

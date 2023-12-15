@@ -4,6 +4,7 @@ add_library(IlpGafferMovie SHARED
   "av_reader.cpp"
   "movie_reader.cpp"
   "movie_writer.cpp"
+  "startup.cpp"
   "internal/SharedDecoders.cpp"
   "internal/SharedFrames.cpp"
   "internal/trace.cpp")
