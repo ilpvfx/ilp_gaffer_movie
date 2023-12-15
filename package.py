@@ -5,11 +5,12 @@ def version():
     return open("VERSION.txt").read().strip()
 
 private_build_requires = [
-    "cmake-3.21+"
+    "cmake-3.21+",
+    "devtoolset-9"
 ]
 
 requires = [
-    "gaffer-1",
+    "gaffer-1.3",
     "ffmpeg-5.1"
 ]
 
