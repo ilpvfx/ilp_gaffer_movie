@@ -177,18 +177,21 @@ Gaffer.Metadata.registerNode(
 
 			"description",
 			"""
-			The index of the video stream to be read. 
+			The video stream to be read. By default try to read the 'best' stream, as suggested 
+			by the decoder. To read a specific video stream provide a value on the form 'N',
+			where N is an integer corresponding to the stream index, e.g. '1'.
 			""",
 			#"presetNames", lambda plug : IECore.StringVectorData( [ str(x) for x in plug.node()["__avReader"]["availableStreamInfo"].getValue() ] ),
-			"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
-			"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
+			#"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
+			#"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
 
 			# "presetNames", IECore.StringVectorData( [ "best (stream #0)", "stream #0", "stream #1" ] ),
 			# "presetValues", IECore.IntVectorData( [ 0, 0, 1] ),
 
 			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
-			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
+			#"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
 
+			"label", "Video Stream",
 		],
 
 		"filterGraph" : [
@@ -237,9 +240,8 @@ Gaffer.Metadata.registerNode(
 		"fileValid" : [
 			"description",
 			"""
-			Whether or not the file exists and can be read into memory. Behaviour 
-			changes	if a frame mask of ClampToFrame or Black is selected, if outside
-			the frame mask fileValid will be set to True if the nearest frame is valid.
+			Whether or not the file exists and can be read into memory. Additionally, the 
+			file must contain at least one video stream.
 			""",
 
 			"layout:section", "Frames",
@@ -294,45 +296,45 @@ class _ColorSpacePlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 			return [ node["__intermediateColorSpace"] ]
 
 
-class _VideoStreamIndexPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
+# class _VideoStreamIndexPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 
-	def __init__( self, plug, **kw ) :
+# 	def __init__( self, plug, **kw ) :
 
-		# self.__textWidget = GafferUI.TextWidget( editable = False )
-		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
+# 		# self.__textWidget = GafferUI.TextWidget( editable = False )
+# 		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
 
-	@staticmethod
-	def _valuesForUpdate( plugs, auxiliaryPlugs ) :
+# 	@staticmethod
+# 	def _valuesForUpdate( plugs, auxiliaryPlugs ) :
 
-		presets = GafferUI.PresetsPlugValueWidget._valuesForUpdate( plugs, [ [] for p in plugs ] )
+# 		presets = GafferUI.PresetsPlugValueWidget._valuesForUpdate( plugs, [ [] for p in plugs ] )
 
-		result = []
-		for preset, colorSpacePlugs in zip( presets, auxiliaryPlugs ) :
+# 		result = []
+# 		for preset, colorSpacePlugs in zip( presets, auxiliaryPlugs ) :
 
-			bestStream = ""
-			if len( colorSpacePlugs ) and preset == "Best" :
-				with IECore.IgnoredExceptions( Gaffer.ProcessException ) :
-					automaticSpace = colorSpacePlugs[0].getValue() or "Working Space"
+# 			bestStream = ""
+# 			if len( colorSpacePlugs ) and preset == "Best" :
+# 				with IECore.IgnoredExceptions( Gaffer.ProcessException ) :
+# 					automaticSpace = colorSpacePlugs[0].getValue() or "Working Space"
 
-			result.append( {
-				"preset" : preset,
-				"automaticSpace" : automaticSpace
-			} )
+# 			result.append( {
+# 				"preset" : preset,
+# 				"automaticSpace" : automaticSpace
+# 			} )
 
-		return result
+# 		return result
 
-	def _updateFromValues( self, values, exception ) :
+# 	def _updateFromValues( self, values, exception ) :
 
-		if not len( values ): 
-			self.__textWidget.setText( "---" )
+# 		if not len( values ): 
+# 			self.__textWidget.setText( "---" )
 
-		self.__textWidget.setErrored( exception is not None )
+# 		self.__textWidget.setErrored( exception is not None )
 
-	def _auxiliaryPlugs( self, plug ) :
+# 	def _auxiliaryPlugs( self, plug ) :
 
-		node = plug.node()
-		if isinstance( node, IlpGafferMovie.MovieReader ) :
-			return [ node["__avReader"] ]
+# 		node = plug.node()
+# 		if isinstance( node, IlpGafferMovie.MovieReader ) :
+# 			return [ node["__avReader"] ]
 
 
 class _AvailableFramesPlugValueWidget( GafferUI.PlugValueWidget ) :

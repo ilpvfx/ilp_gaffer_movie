@@ -44,7 +44,7 @@ public:
   // Number of times the node has been refreshed.
   PLUG_MEMBER_DECL(refreshCountPlug, Gaffer::IntPlug);
 
-  PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
+  PLUG_MEMBER_DECL(videoStreamPlug, Gaffer::StringPlug);
   PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
   PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
@@ -119,6 +119,8 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
+  std::optional<int> _videoStreamIndex(const Gaffer::Context *context) const;
+
   std::shared_ptr<void> _retrieveDecoder(const Gaffer::Context *context) const;
 
   std::shared_ptr<void> _retrieveFrame(
