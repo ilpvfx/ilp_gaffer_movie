@@ -3,6 +3,7 @@
 #include <cstddef>// std::size_t
 #include <cstdint>// int64_t, etc.
 #include <memory>// std::unique_ptr
+#include <optional>// std::optional
 #include <string>// std::string
 #include <vector>// std::vector
 
@@ -122,6 +123,10 @@ public:
   // Note that some properties, such as pixel format, may differ from the decoded frames,
   // since those are potentially pushed through a filter graph.
   [[nodiscard]] auto VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &;
+
+
+  [[nodiscard]] auto VideoStreamHeader(int stream_index) const
+    -> std::optional<InputVideoStreamHeader>;
 
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool;

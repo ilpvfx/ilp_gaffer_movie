@@ -142,10 +142,10 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     /*defaultValue=*/0));
   addChild(endPlug);// [4]
 
-  addChild(new IntPlug(// [5]
+  addChild(new StringPlug(// [5]
     /*name=*/"videoStreamIndex",
     /*direction=*/Plug::In,
-    /*defaultValue=*/-1));
+    /*defaultValue=*/"best"));
   addChild(new StringPlug(// [6]
     /*name=*/"filterGraph",
     /*direction=*/Plug::In,
@@ -194,7 +194,7 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   avReader->fileNamePlug()->setInput(fileNamePlug());
   avReader->refreshCountPlug()->setInput(refreshCountPlug());
   avReader->missingFrameModePlug()->setInput(missingFrameModePlug());
-  avReader->videoStreamIndexPlug()->setInput(videoStreamIndexPlug());
+  avReader->videoStreamPlug()->setInput(videoStreamPlug());
   avReader->filterGraphPlug()->setInput(filterGraphPlug());
   _intermediateMetadataPlug()->setInput(avReader->outPlug()->metadataPlug());
   _intermediateFileValidPlug()->setInput(avReader->fileValidPlug());
@@ -243,7 +243,7 @@ PLUG_MEMBER_IMPL_SUB(startFramePlug, Gaffer::IntPlug, 3U, 1U);
 PLUG_MEMBER_IMPL_SUB(endModePlug, Gaffer::IntPlug, 4U, 0U);
 PLUG_MEMBER_IMPL_SUB(endFramePlug, Gaffer::IntPlug, 4U, 1U);
 
-PLUG_MEMBER_IMPL(videoStreamIndexPlug, Gaffer::IntPlug, 5U);
+PLUG_MEMBER_IMPL(videoStreamPlug, Gaffer::StringPlug, 5U);
 PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 6U);
 
 PLUG_MEMBER_IMPL(colorSpacePlug, Gaffer::StringPlug, 7U);
@@ -333,7 +333,7 @@ void MovieReader::hash(const Gaffer::ValuePlug *output,
     _intermediateMetadataPlug()->hash(/*out*/ h);
     colorSpacePlug()->hash(/*out*/ h);
     fileNamePlug()->hash(/*out*/ h);
-    videoStreamIndexPlug()->hash(/*out*/ h);
+    videoStreamPlug()->hash(/*out*/ h);
     h.append(OCIOAlgo::currentConfigHash());
   } else if (output == fileValidPlug()) {
     TRACE("MovieReader", "hash - fileValid");

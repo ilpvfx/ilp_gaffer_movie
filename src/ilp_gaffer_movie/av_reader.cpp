@@ -32,22 +32,6 @@ GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::AvReader);
 
 static const IECore::InternedString kTileBatchIndexContextName("__tileBatchIndex");
 
-#if 0
-// This function transforms an input region to account for the display window being flipped.
-// This is similar to Format::fromEXRSpace/toEXRSpace but those functions mix in switching
-// between inclusive/exclusive bounds, so in order to use them we would have to add a bunch
-// of confusing offsets by 1.  In this class, we always interpret ranges as [ minPixel,
-// onePastMaxPixel )
-[[nodiscard]] static auto FlopDisplayWindow(const Imath::Box2i &b,
-  const int displayOriginY,
-  const int displayHeight) -> Imath::Box2i
-{
-  return Imath::Box2i(
-    Imath::V2i(b.min.x, displayOriginY + displayOriginY + displayHeight - b.max.y),
-    Imath::V2i(b.max.x, displayOriginY + displayOriginY + displayHeight - b.min.y));
-}
-#endif
-
 namespace IlpGafferMovie {
 
 std::size_t AvReader::g_firstPlugIndex = 0;
@@ -72,20 +56,18 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode{ name }
   addChild(new IntPlug(// [1]
     /*name=*/"refreshCount",
     /*direction=*/Plug::In));
-
   addChild(new IntPlug(// [2]
-    /*name=*/"videoStreamIndex",
-    /*direction=*/Plug::In));
-  addChild(new StringPlug(// [3]
-    /*name=*/"filterGraph",
-    /*direction=*/Plug::In));
-
-  addChild(new IntPlug(// [4]
     /*name=*/"missingFrameMode",
     /*direction=*/Plug::In,
     /*defaultValue=*/static_cast<int>(MissingFrameMode::Error),
     /*minValue=*/static_cast<int>(MissingFrameMode::Error),
     /*maxValue=*/static_cast<int>(MissingFrameMode::Hold)));
+  addChild(new StringPlug(// [3]
+    /*name=*/"videoStream",
+    /*direction=*/Plug::In));
+  addChild(new StringPlug(// [4]
+    /*name=*/"filterGraph",
+    /*direction=*/Plug::In));
 
   addChild(new StringVectorDataPlug(// [5]
     /*name=*/"availableVideoStreamInfo",
@@ -103,6 +85,9 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode{ name }
   addChild(new BoolPlug(// [8]
     /*name=*/"fileValid",
     /*direction=*/Plug::Out));
+
+
+  // Stream #0,
 
 #if 0
   addChild(new ObjectVectorPlug(// [XYZ]
@@ -130,22 +115,16 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode{ name }
 
 PLUG_MEMBER_IMPL(fileNamePlug, Gaffer::StringPlug, 0U);
 PLUG_MEMBER_IMPL(refreshCountPlug, Gaffer::IntPlug, 1U);
-PLUG_MEMBER_IMPL(videoStreamIndexPlug, Gaffer::IntPlug, 2U);
-PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 3U);
-
-PLUG_MEMBER_IMPL(missingFrameModePlug, Gaffer::IntPlug, 4U);
+PLUG_MEMBER_IMPL(missingFrameModePlug, Gaffer::IntPlug, 2U);
+PLUG_MEMBER_IMPL(videoStreamPlug, Gaffer::StringPlug, 3U);
+PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 4U);
 
 PLUG_MEMBER_IMPL(availableVideoStreamInfoPlug, Gaffer::StringVectorDataPlug, 5U);
 PLUG_MEMBER_IMPL(availableVideoStreamIndicesPlug, Gaffer::IntVectorDataPlug, 6U);
 PLUG_MEMBER_IMPL(availableFramesPlug, Gaffer::IntVectorDataPlug, 7U);
-
 PLUG_MEMBER_IMPL(fileValidPlug, Gaffer::BoolPlug, 8U);
 
 // PLUG_MEMBER_IMPL(_tileBatchPlug, Gaffer::ObjectVectorPlug, 8U);
-
-#if 0
-PLUG_MEMBER_IMPL(missingFrameModePlug, Gaffer::IntPlug, XXX);
-#endif
 
 size_t AvReader::supportedExtensions(std::vector<std::string> &extensions)
 {
@@ -155,9 +134,12 @@ size_t AvReader::supportedExtensions(std::vector<std::string> &extensions)
 
 void AvReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const
 {
+  // clang-format off
+
   GafferImage::ImageNode::affects(input, outputs);
 
-  if (input == fileNamePlug() || input == refreshCountPlug()) {
+  if (input == fileNamePlug() || 
+      input == refreshCountPlug()) {
     TRACE("AvReader", "affects - fileName | refreshCount");
 
     outputs.push_back(fileValidPlug());
@@ -165,8 +147,10 @@ void AvReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &output
     outputs.push_back(availableVideoStreamIndicesPlug());
   }
 
-  if (input == fileNamePlug() || input == refreshCountPlug() || input == missingFrameModePlug()
-      || input == videoStreamIndexPlug()) {
+  if (input == fileNamePlug() || 
+      input == refreshCountPlug() || 
+      input == missingFrameModePlug() || 
+      input == videoStreamPlug()) {
     TRACE("AvReader", "affects - fileName | refreshCount | videoStreamIndex");
 
     outputs.push_back(availableFramesPlug());
@@ -176,6 +160,8 @@ void AvReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &output
       outputs.push_back(it->get());
     }
   }
+
+  // clang-format on
 }
 
 void AvReader::hash(const Gaffer::ValuePlug *output,
@@ -198,7 +184,7 @@ void AvReader::hash(const Gaffer::ValuePlug *output,
 
     fileNamePlug()->hash(/*out*/ h);
     refreshCountPlug()->hash(/*out*/ h);
-    videoStreamIndexPlug()->hash(/*out*/ h);
+    videoStreamPlug()->hash(/*out*/ h);
   }
 #if 0
   else if (output == _tileBatchPlug()) {
@@ -244,27 +230,26 @@ void AvReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context
     TRACE("AvReader", "compute - availableFrames");
 
     const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
-    const int video_stream_index = videoStreamIndexPlug()->getValue();
-    if (decoder == nullptr || !decoder->IsOpen() || video_stream_index < 0) {
+    if (decoder == nullptr) {
       static_cast<IntVectorDataPlug *>(output)->setToDefault();// NOLINT
-    } else {
-      auto &&video_stream_headers = decoder->VideoStreamHeaders();
-      if (video_stream_headers.empty()) {
-        // The file contains no video streams.
-        static_cast<IntVectorDataPlug *>(output)->setToDefault();// NOLINT
-      }
-
-      assert(0 <= video_stream_index// NOLINT
-             && video_stream_index < static_cast<int>(video_stream_headers.size()));
-      const auto &dvsi = video_stream_headers[static_cast<size_t>(video_stream_index)];
-      assert(dvsi.frame_count >= 0);// NOLINT
-      IntVectorDataPtr resultData = new IntVectorData;
-      auto &result = resultData->writable();
-      result.resize(static_cast<size_t>(dvsi.frame_count));
-      const int start_value = 1;// TODO(tohi): Could be different?
-      std::iota(std::begin(result), std::end(result), start_value);
-      static_cast<IntVectorDataPlug *>(output)->setValue(resultData);// NOLINT
     }
+
+    const auto idx = _videoStreamIndex(context);
+    if (!idx.has_value()) {
+      static_cast<IntVectorDataPlug *>(output)->setToDefault();// NOLINT
+    }
+
+    const auto hdr = decoder->VideoStreamHeader(*idx);
+    if (!hdr.has_value()) {
+      static_cast<IntVectorDataPlug *>(output)->setToDefault();// NOLINT
+    }
+
+    IntVectorDataPtr resultData = new IntVectorData;
+    auto &result = resultData->writable();
+    result.resize(static_cast<std::size_t>(hdr->frame_count));
+    const int start_value = 1;// TODO(tohi): Could be different?
+    std::iota(std::begin(result), std::end(result), start_value);
+    static_cast<IntVectorDataPlug *>(output)->setValue(resultData);// NOLINT
   } else if (output == availableVideoStreamInfoPlug()) {
     TRACE("AvReader", "compute - availableVideoStreamInfo");
 
@@ -408,7 +393,7 @@ void AvReader::hashFormat(const GafferImage::ImagePlug *parent,
   refreshCountPlug()->hash(/*out*/ h);
   missingFrameModePlug()->hash(/*out*/ h);
 
-  videoStreamIndexPlug()->hash(/*out*/ h);
+  videoStreamPlug()->hash(/*out*/ h);
   filterGraphPlug()->hash(/*out*/ h);
 
   // Check if defaults have changed.
@@ -424,8 +409,9 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
 {
   TRACE("AvReader", "computeDataFormat");
 
-  // NOTE(tohi): We cannot rely on the video stream headers here, since the pixel dimensions of
-  //             the video frames could be modified by the filter graph.
+  // NOTE(tohi):
+  // We cannot rely on the video stream headers here, since the pixel dimensions of
+  // the video frames could be modified by the filter graph.
 
   int width = -1;
   int height = -1;
@@ -433,24 +419,31 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
   const auto frame =
     std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
   if (frame == nullptr) {
+    // No frame available, try to get information from decoder stream header.
+
     const auto decoder = std::static_pointer_cast<ilp_movie::Decoder>(_retrieveDecoder(context));
     if (decoder == nullptr) {
       // Neither frame nor decoder available.
       return GafferImage::FormatPlug::getDefaultFormat(context);
     }
     assert(decoder->IsOpen());// NOLINT
-    auto &&videoStreamHeaders = decoder->VideoStreamHeaders();
-    assert(!videoStreamHeaders.empty());// NOLINT
-    int videoStreamIndex = videoStreamIndexPlug()->getValue();
-    if (videoStreamIndex < 0) {
-      videoStreamIndex = decoder->BestVideoStreamIndex();
-      assert(videoStreamIndex >= 0);// NOLINT
+
+    const auto idx = _videoStreamIndex(context);
+    if (!idx.has_value()) {
+      // Bad video stream index.
+      return GafferImage::FormatPlug::getDefaultFormat(context);
     }
-    const auto &dvsi = videoStreamHeaders.at(static_cast<std::size_t>(videoStreamIndex));
-    width = dvsi.width;
-    height = dvsi.height;
-    if (dvsi.pixel_aspect_ratio.num > 0 && dvsi.pixel_aspect_ratio.den > 0) {
-      pixelAspect = static_cast<double>(dvsi.pixel_aspect_ratio.num) / dvsi.pixel_aspect_ratio.den;
+
+    const auto hdr = decoder->VideoStreamHeader(*idx);
+    if (!hdr.has_value()) {
+      // Header not found.
+      return GafferImage::FormatPlug::getDefaultFormat(context);
+    }
+
+    width = hdr->width;
+    height = hdr->height;
+    if (hdr->pixel_aspect_ratio.num > 0 && hdr->pixel_aspect_ratio.den > 0) {
+      pixelAspect = static_cast<double>(hdr->pixel_aspect_ratio.num) / hdr->pixel_aspect_ratio.den;
     }
   } else {
     width = frame->width;
@@ -461,8 +454,9 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
     }
   }
 
+  if (!(width >= 0 && height >= 0)) { return GafferImage::FormatPlug::getDefaultFormat(context); }
+
   // clang-format off
-  assert(width >= 0 && height >= 0);//NOLINT
   return GafferImage::Format{ 
     Imath::Box2i{ 
       /*minT=*/Imath::V2i{ 0, 0 },
@@ -484,7 +478,7 @@ void AvReader::hashDataWindow(const GafferImage::ImagePlug *parent,
   refreshCountPlug()->hash(/*out*/ h);
   missingFrameModePlug()->hash(/*out*/ h);
 
-  videoStreamIndexPlug()->hash(/*out*/ h);
+  videoStreamPlug()->hash(/*out*/ h);
   filterGraphPlug()->hash(/*out*/ h);
 
   h.append(context->get<std::string>(
@@ -510,16 +504,21 @@ Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context *context,
       return parent->dataWindowPlug()->defaultValue();
     }
     assert(decoder->IsOpen());// NOLINT
-    auto &&videoStreamHeaders = decoder->VideoStreamHeaders();
-    assert(!videoStreamHeaders.empty());// NOLINT
-    int videoStreamIndex = videoStreamIndexPlug()->getValue();
-    if (videoStreamIndex < 0) {
-      videoStreamIndex = decoder->BestVideoStreamIndex();
-      assert(videoStreamIndex >= 0);// NOLINT
+
+    const auto idx = _videoStreamIndex(context);
+    if (!idx.has_value()) {
+      // Bad video stream index.
+      return parent->dataWindowPlug()->defaultValue();
     }
-    const auto &dvsi = videoStreamHeaders.at(static_cast<std::size_t>(videoStreamIndex));
-    width = dvsi.width;
-    height = dvsi.height;
+
+    const auto hdr = decoder->VideoStreamHeader(*idx);
+    if (!hdr.has_value()) {
+      // Header not found.
+      return parent->dataWindowPlug()->defaultValue();
+    }
+
+    width = hdr->width;
+    height = hdr->height;
   } else {
     width = frame->width;
     height = frame->height;
@@ -542,7 +541,7 @@ void AvReader::hashMetadata(const GafferImage::ImagePlug *parent,
   h.append(context->getFrame());
   refreshCountPlug()->hash(/*out*/ h);
   missingFrameModePlug()->hash(/*out*/ h);
-  videoStreamIndexPlug()->hash(/*out*/ h);
+  videoStreamPlug()->hash(/*out*/ h);
   h.append(context->get<std::string>(
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
@@ -599,7 +598,7 @@ void AvReader::hashSampleOffsets(const GafferImage::ImagePlug *parent,
     h.append(context->getFrame());
     refreshCountPlug()->hash(/*out*/ h);
     missingFrameModePlug()->hash(/*out*/ h);
-    videoStreamIndexPlug()->hash(/*out*/ h);
+    videoStreamPlug()->hash(/*out*/ h);
   }
 }
 
@@ -621,7 +620,7 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
   h.append(context->getFrame());
   refreshCountPlug()->hash(/*out*/ h);
   missingFrameModePlug()->hash(/*out*/ h);
-  videoStreamIndexPlug()->hash(/*out*/ h);
+  videoStreamPlug()->hash(/*out*/ h);
   h.append(context->get<std::string>(
     GafferImage::ImagePlug::viewNameContextName, GafferImage::ImagePlug::defaultViewName));
 }
@@ -677,7 +676,7 @@ void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
     h.append(context->getFrame());
     refreshCountPlug()->hash(/*out*/ h);
     missingFrameModePlug()->hash(/*out*/ h);
-    videoStreamIndexPlug()->hash(/*out*/ h);
+    videoStreamPlug()->hash(/*out*/ h);
   }
 }
 
@@ -771,6 +770,26 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   return tileData;
 }
 
+std::optional<int> AvReader::_videoStreamIndex(const Gaffer::Context *context) const
+{
+  const std::string str = context->substitute(videoStreamPlug()->getValue());
+  TRACE("AvReader", boost::str(boost::format("videoStream: '%1%'") % str.c_str()));
+
+  std::optional<int> idx{};
+  if (str == "best") {
+    idx = -1;
+  } else {
+    int p{};
+    if (std::from_chars(str.data(), str.data() + str.size(), /*out*/ p).ec// NOLINT
+        == std::errc()) {
+      idx = p;
+    }
+  }
+
+  TRACE("AvReader", boost::str(boost::format("index: %1%") % str.c_str()));
+  return idx;
+}
+
 std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context) const
 {
   TRACE("AvReader",
@@ -778,15 +797,19 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context)
 
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
+  std::string resolvedFileName = context->substitute(fileName);
 
-  const std::string resolvedFileName = context->substitute(fileName);
+  std::string resolvedFilterGraph = context->substitute(filterGraphPlug()->getValue());
+  if (resolvedFilterGraph.empty()) {
+    resolvedFilterGraph = "null";// Pass-through video filter.
+  }
 
   // clang-format off
   const auto decoderEntry = shared_decoders_internal::SharedDecoders::get(
     /*key=*/shared_decoders_internal::DecoderCacheKey{ 
-      /*.fileName=*/resolvedFileName,
+      /*.fileName=*/std::move(resolvedFileName),
       /*.filterGraphDescr=*/{ 
-        /*.filter-descr=*/filterGraphPlug()->getValue(),
+        /*.filter_descr=*/std::move(resolvedFilterGraph),
         /*.out_pix_fmt_name=*/"gbrpf32le" 
       } 
     });
@@ -806,23 +829,36 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
+  std::string resolvedFileName = context->substitute(fileName);
 
-  const std::string resolvedFileName = context->substitute(fileName);
-  const int videoStreamIndex = videoStreamIndexPlug()->getValue();
+  const auto idx = _videoStreamIndex(context);
+  if (!idx.has_value()) { 
+    TRACE("AvReader", "bad stream index");
+    return nullptr; 
+  }
+  TRACE("AvReader", boost::str(boost::format("stream index: %1%") % *idx));
+
   const std::string filterGraph = filterGraphPlug()->getValue();
+  std::string resolvedFilterGraph = context->substitute(filterGraph);
+  if (resolvedFilterGraph.empty()) {
+    // Pass-through video filter.
+    resolvedFilterGraph = "null";
+  }
+
+  const int frameNb = static_cast<int>(context->getFrame());
 
   // clang-format off
   auto frameEntry = shared_frames_internal::SharedFrames::get(
     /*key=*/shared_frames_internal::FrameCacheKey{
       /*.decoder_key=*/shared_decoders_internal::DecoderCacheKey{ 
-        /*.fileName=*/resolvedFileName,
+        /*.fileName=*/std::move(resolvedFileName),
         /*.filterGraphDescr=*/{ 
-          /*.filter_descr=*/filterGraph,
+          /*.filter_descr=*/std::move(resolvedFilterGraph),
           /*.out_pix_fmt_name=*/"gbrpf32le" 
         } 
       },
-      /*.video_stream_index=*/videoStreamIndex,
-      /*.frame_nb=*/static_cast<int>(context->getFrame())
+      /*.video_stream_index=*/*idx,
+      /*.frame_nb=*/frameNb
     });
   // clang-format on
   if (frameEntry.frame == nullptr) {
@@ -835,10 +871,9 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
       IECore::ConstIntVectorDataPtr frameData = availableFramesPlug()->getValue();
       const std::vector<int> &frames = frameData->readable();
       if (!frames.empty()) {
-        auto fIt =
-          std::lower_bound(frames.begin(), frames.end(), static_cast<int>(context->getFrame()));
+        auto fIt = std::lower_bound(frames.begin(), frames.end(), frameNb);
 
-        // Get the previous frame, unless this is the first frame, in which 
+        // Get the previous frame, unless this is the first frame, in which
         // case we hold to the beginning of the sequence.
         if (fIt != frames.begin()) { fIt = std::prev(fIt); }
 
@@ -846,18 +881,20 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
         Gaffer::Context::EditableScope holdScope(context);
         holdScope.setFrame(static_cast<float>(*fIt));
 
-        const std::string resolvedFileNameHeld = holdScope.context()->substitute(fileName);
+        std::string resolvedFileNameHeld = holdScope.context()->substitute(fileName);
+        std::string resolvedFilterGraphHeld = holdScope.context()->substitute(filterGraph);
+
         // clang-format off
         frameEntry = shared_frames_internal::SharedFrames::get(
           /*key=*/shared_frames_internal::FrameCacheKey{
             /*.decoder_key=*/shared_decoders_internal::DecoderCacheKey{ 
-              /*.fileName=*/resolvedFileNameHeld,
+              /*.fileName=*/std::move(resolvedFileNameHeld),
               /*.filterGraphDescr=*/{ 
-                /*.filter_descr=*/filterGraph,
+                /*.filter_descr=*/std::move(resolvedFilterGraphHeld),
                 /*.out_pix_fmt_name=*/"gbrpf32le" 
               } 
             },
-            /*.video_stream_index=*/videoStreamIndex,
+            /*.video_stream_index=*/*idx,
             /*.frame_nb=*/static_cast<int>(holdScope.context()->getFrame())
           });
         // clang-format on
@@ -883,10 +920,6 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
     // going to return black pixels
     mode = Hold;
   }
-  ImageReader::ChannelInterpretation channelNaming =
-    (ImageReader::ChannelInterpretation)channelInterpretationPlug()->getValue();
-
-  const std::string resolvedFileName = context->substitute(fileName);
 #endif
 }
 

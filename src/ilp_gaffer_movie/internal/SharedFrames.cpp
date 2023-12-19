@@ -28,15 +28,6 @@ FrameLRUCache &cache()
       }
       assert(decoderEntry.decoder->IsOpen());// NOLINT
 
-      int video_stream_index = key.video_stream_index;
-      if (video_stream_index < 0) {
-        video_stream_index = decoderEntry.decoder->BestVideoStreamIndex();
-        if (video_stream_index < 0) { 
-          result.error = std::make_shared<std::string>("Bad video stream index");
-          return result; 
-        }
-      }
-
       try {
         auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
         if (!decoderEntry.decoder->DecodeVideoFrame(

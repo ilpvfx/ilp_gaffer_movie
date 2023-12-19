@@ -450,16 +450,41 @@ public:
     return _video_stream_headers;
   }
 
+  [[nodiscard]] auto VideoStreamHeader(const int stream_index) const
+    -> std::optional<InputVideoStreamHeader>
+  {
+    if (_video_stream_headers.empty()) {
+      return std::nullopt;
+    }
+   
+    const int index = stream_index == -1 ? _best_video_stream : stream_index;
+    if (index < 0) {
+      return std::nullopt;
+    }
+
+    // Linear search.
+    for (auto&& h : _video_stream_headers) {
+      if (h.stream_index == index) {
+        return h;
+      }
+    }
+
+    // No suitable header found.
+    return std::nullopt;
+  }
+
+
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool
   {
+    const int index = stream_index == -1 ? _best_video_stream : stream_index;
+
     Stream *stream = nullptr;
     filter_graph_internal::FilterGraph *filter_graph = nullptr;
-    if (const auto fs_iter = _video_streams.find(stream_index); fs_iter != _video_streams.end()) {
+    if (const auto fs_iter = _video_streams.find(index); fs_iter != _video_streams.end()) {
       stream = fs_iter->second.stream.get();
       filter_graph = fs_iter->second.filter_graph.get();
     } else {
-      // TODO: log warning
       LogMsg(LogLevel::kWarning, "Bad stream index for decoding video frame\n");
       return false;
     }
@@ -467,9 +492,7 @@ public:
     assert(filter_graph != nullptr);// NOLINT
 
     // Check if frame exists in stream.
-    if (!(1 <= frame_nb && frame_nb <= stream->FrameCount())) {
-      return false;
-    }
+    if (!(1 <= frame_nb && frame_nb <= stream->FrameCount())) { return false; }
 
     const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
@@ -628,6 +651,12 @@ auto Decoder::BestVideoStreamIndex() const noexcept -> int
 auto Decoder::VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
 {
   return Pimpl()->VideoStreamHeaders();
+}
+
+auto Decoder::VideoStreamHeader(const int stream_index) const
+  -> std::optional<InputVideoStreamHeader>
+{
+  return Pimpl()->VideoStreamHeader(stream_index);
 }
 
 auto Decoder::DecodeVideoFrame(const int stream_index,

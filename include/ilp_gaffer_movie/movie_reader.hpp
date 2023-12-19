@@ -67,7 +67,7 @@ public:
 
   PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
 
-  PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
+  PLUG_MEMBER_DECL(videoStreamPlug, Gaffer::StringPlug);
   PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
   PLUG_MEMBER_DECL(startModePlug, Gaffer::IntPlug);
