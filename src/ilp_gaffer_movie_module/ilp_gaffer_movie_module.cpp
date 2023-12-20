@@ -125,10 +125,10 @@ BOOST_PYTHON_MODULE(_IlpGafferMovie)// NOLINT
 		;
 
     enum_<IlpGafferMovie::MovieReader::FrameMaskMode>("FrameMaskMode")
-      .value("None", IlpGafferMovie::MovieReader::FrameMaskMode::kNone)
-      .value("None_", IlpGafferMovie::MovieReader::FrameMaskMode::kNone)
-      .value("BlackOutside", IlpGafferMovie::MovieReader::FrameMaskMode::kBlackOutside)
-      .value("ClampToFrame", IlpGafferMovie::MovieReader::FrameMaskMode::kClampToFrame)
+      .value("None", IlpGafferMovie::MovieReader::FrameMaskMode::None)
+      .value("None_", IlpGafferMovie::MovieReader::FrameMaskMode::None)
+      .value("BlackOutside", IlpGafferMovie::MovieReader::FrameMaskMode::BlackOutside)
+      .value("ClampToFrame", IlpGafferMovie::MovieReader::FrameMaskMode::ClampToFrame)
     ;
 
     // clang-format on

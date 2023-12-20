@@ -1,16 +1,17 @@
 #pragma once
 
-#include <GafferImage/ImageNode.h>
+#include "GafferImage/ImageNode.h"
 
-#include <Gaffer/CompoundNumericPlug.h>
+#include "Gaffer/CompoundNumericPlug.h"
 
 #include "OpenColorIO/OpenColorTypes.h"
 
-#include <functional>
-#include <string>
+#include <functional>// std::function
+#include <string>// std::string
+#include <vector>// std::vector
 
-#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
-#include <ilp_gaffer_movie/type_id.hpp>
+#include "ilp_gaffer_movie/ilp_gaffer_movie_export.hpp"
+#include "ilp_gaffer_movie/type_id.hpp"
 
 namespace Gaffer {
 IE_CORE_FORWARDDECLARE(StringPlug)
@@ -39,26 +40,28 @@ public:
     TypeId::kMovieReaderTypeId,
     GafferImage::ImageNode)
 
-  // The MissingFrameMode controls how to handle missing images.
+  // clang-format off
+
+  // The MissingFrameMode controls how to handle missing frames.
   // It is distinct from AvReader::MissingFrameMode so
   // that we can provide alternate modes using higher
   // level approaches in the future (e.g interpolation).
   enum MissingFrameMode {
     Error = 0,
-    Black,
-    Hold,
+    Black = 1,
+    Hold  = 2,
   };
 
-  // The FrameMaskMode controls how to handle images
+  // The FrameMaskMode controls how to handle frames
   // outside of the values provided by the start
   // and end frame masks.
-  enum class FrameMaskMode : int {
-    // clang-format off
-    kNone         = 0,
-    kBlackOutside = 1,
-    kClampToFrame = 2,
-    // clang-format on
+  enum FrameMaskMode {
+    None         = 0,
+    BlackOutside = 1,
+    ClampToFrame = 2,
   };
+
+  // clang-format on
 
   PLUG_MEMBER_DECL(fileNamePlug, Gaffer::StringPlug);
 
@@ -67,19 +70,17 @@ public:
 
   PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
 
-  PLUG_MEMBER_DECL(videoStreamPlug, Gaffer::StringPlug);
-  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
-
   PLUG_MEMBER_DECL(startModePlug, Gaffer::IntPlug);
   PLUG_MEMBER_DECL(startFramePlug, Gaffer::IntPlug);
-
   PLUG_MEMBER_DECL(endModePlug, Gaffer::IntPlug);
   PLUG_MEMBER_DECL(endFramePlug, Gaffer::IntPlug);
 
   PLUG_MEMBER_DECL(colorSpacePlug, Gaffer::StringPlug);
 
-  PLUG_MEMBER_DECL(availableFramesPlug, Gaffer::IntVectorDataPlug);
+  PLUG_MEMBER_DECL(videoStreamPlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
+  PLUG_MEMBER_DECL(availableFramesPlug, Gaffer::IntVectorDataPlug);
   PLUG_MEMBER_DECL(fileValidPlug, Gaffer::BoolPlug);
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
@@ -171,9 +172,10 @@ private:
 
   static DefaultColorSpaceFunction &_defaultColorSpaceFunction();
 
-  static size_t FirstPlugIndex;
+  static size_t g_FirstPlugIndex;
 };
 
+// Keep macro local.
 #undef PLUG_MEMBER_DECL
 
 IE_CORE_DECLAREPTR(MovieReader)

@@ -86,9 +86,6 @@ AvReader::AvReader(const std::string &name) : GafferImage::ImageNode{ name }
     /*name=*/"fileValid",
     /*direction=*/Plug::Out));
 
-
-  // Stream #0,
-
 #if 0
   addChild(new ObjectVectorPlug(// [XYZ]
     /*name=*/"__tileBatch",
@@ -150,7 +147,8 @@ void AvReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &output
   if (input == fileNamePlug() || 
       input == refreshCountPlug() || 
       input == missingFrameModePlug() || 
-      input == videoStreamPlug()) {
+      input == videoStreamPlug() ||
+      input == filterGraphPlug()) {
     TRACE("AvReader", "affects - fileName | refreshCount | videoStreamIndex");
 
     outputs.push_back(availableFramesPlug());
@@ -773,7 +771,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 std::optional<int> AvReader::_videoStreamIndex(const Gaffer::Context *context) const
 {
   const std::string str = context->substitute(videoStreamPlug()->getValue());
-  TRACE("AvReader", boost::str(boost::format("videoStream: '%1%'") % str.c_str()));
+  //TRACE("AvReader", boost::str(boost::format("videoStream: '%1%'") % str.c_str()));
 
   std::optional<int> idx{};
   if (str == "best") {
@@ -786,14 +784,14 @@ std::optional<int> AvReader::_videoStreamIndex(const Gaffer::Context *context) c
     }
   }
 
-  TRACE("AvReader", boost::str(boost::format("index: %1%") % str.c_str()));
+  //TRACE("AvReader", boost::str(boost::format("index: %1%") % str.c_str()));
   return idx;
 }
 
 std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context) const
 {
-  TRACE("AvReader",
-    (boost::format("_retrieveDecoder: '%1%'") % fileNamePlug()->getValue().c_str()).str());
+  // TRACE("AvReader",
+  //   (boost::format("_retrieveDecoder: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
@@ -824,8 +822,8 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context)
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
   bool holdForBlack = false*/) const
 {
-  TRACE("AvReader",
-    (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
+  // TRACE("AvReader",
+  //   (boost::format("_retrieveFrame: '%1%'") % fileNamePlug()->getValue().c_str()).str());
 
   const std::string fileName = fileNamePlug()->getValue();
   if (fileName.empty()) { return nullptr; }
@@ -833,10 +831,8 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
 
   const auto idx = _videoStreamIndex(context);
   if (!idx.has_value()) { 
-    TRACE("AvReader", "bad stream index");
     return nullptr; 
   }
-  TRACE("AvReader", boost::str(boost::format("stream index: %1%") % *idx));
 
   const std::string filterGraph = filterGraphPlug()->getValue();
   std::string resolvedFilterGraph = context->substitute(filterGraph);
@@ -910,7 +906,7 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context/*,
     }
   }
 
-  TRACE("AvReader", "_retrieveFrame: return frame");
+  //TRACE("AvReader", "_retrieveFrame: return frame");
   return frameEntry.frame;
 
 #if 0
