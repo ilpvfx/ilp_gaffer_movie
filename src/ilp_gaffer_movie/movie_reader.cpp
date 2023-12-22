@@ -40,27 +40,25 @@ public:
   FrameMaskScope(const Gaffer::Context *context,
     const IlpGafferMovie::MovieReader *reader,
     bool clampBlack = false)
-    : EditableScope(context), _mode(IlpGafferMovie::MovieReader::FrameMaskMode::kNone)
+    : EditableScope(context), _mode(IlpGafferMovie::MovieReader::FrameMaskMode::None)
   {
+    using MovieReader = IlpGafferMovie::MovieReader;
+
     const int startFrame = reader->startFramePlug()->getValue();
     const int endFrame = reader->endFramePlug()->getValue();
     const auto frame = static_cast<int>(context->getFrame());
 
-    // clang-format off
     if (frame < startFrame) {
-      _mode = static_cast<IlpGafferMovie::MovieReader::FrameMaskMode>(
-          reader->startModePlug()->getValue());
+      _mode = static_cast<MovieReader::FrameMaskMode>(reader->startModePlug()->getValue());
     } else if (frame > endFrame) {
-      _mode = static_cast<IlpGafferMovie::MovieReader::FrameMaskMode>(
-          reader->endModePlug()->getValue());
-    }
-    // clang-format on
-
-    if (_mode == IlpGafferMovie::MovieReader::FrameMaskMode::kBlackOutside && clampBlack) {
-      _mode = IlpGafferMovie::MovieReader::FrameMaskMode::kClampToFrame;
+      _mode = static_cast<MovieReader::FrameMaskMode>(reader->endModePlug()->getValue());
     }
 
-    if (_mode == IlpGafferMovie::MovieReader::FrameMaskMode::kClampToFrame) {
+    if (_mode == MovieReader::FrameMaskMode::BlackOutside && clampBlack) {
+      _mode = MovieReader::FrameMaskMode::ClampToFrame;
+    }
+
+    if (_mode == MovieReader::FrameMaskMode::ClampToFrame) {
       setFrame(static_cast<float>(Imath::clamp(frame, startFrame, endFrame)));
     }
   }
@@ -73,12 +71,11 @@ private:
 
 }// namespace
 
-
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieReader);
 
 namespace IlpGafferMovie {
 
-size_t MovieReader::FirstPlugIndex = 0U;
+size_t MovieReader::g_FirstPlugIndex = 0U;
 
 MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
 {
@@ -94,11 +91,7 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   using ColorSpace = GafferImage::ColorSpace;
   using ColorSpacePtr = GafferImage::ColorSpacePtr;
 
-  // Please LINTer, it doesn't like bit-wise operations on signed integer types.
-  constexpr auto kPlugDefault = static_cast<unsigned int>(Plug::Default);
-  constexpr auto kPlugSerialisable = static_cast<unsigned int>(Plug::Serialisable);
-
-  storeIndexOfNextChild(FirstPlugIndex);
+  storeIndexOfNextChild(g_FirstPlugIndex);
   addChild(new StringPlug(// [0]
     /*name=*/"fileName",
     /*direction=*/Plug::In));
@@ -110,17 +103,17 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     /*direction=*/Plug::In,
     /*defaultValue=*/static_cast<int>(MissingFrameMode::Error),
     /*minValue=*/static_cast<int>(MissingFrameMode::Error),
-    /*maxValue=*/static_cast<int>(MissingFrameMode::Hold)
-  ));
+    /*maxValue=*/static_cast<int>(MissingFrameMode::Hold)));
+
   ValuePlugPtr startPlug = new ValuePlug(
     /*name=*/"start",
     /*direction=*/Plug::In);
   startPlug->addChild(new IntPlug(// [3][0]
     /*name=*/"mode",
     /*direction=*/Plug::In,
-    /*defaultValue=*/static_cast<int>(FrameMaskMode::kNone),
-    /*minValue=*/static_cast<int>(FrameMaskMode::kNone),
-    /*maxValue=*/static_cast<int>(FrameMaskMode::kClampToFrame)));
+    /*defaultValue=*/static_cast<int>(FrameMaskMode::None),
+    /*minValue=*/static_cast<int>(FrameMaskMode::None),
+    /*maxValue=*/static_cast<int>(FrameMaskMode::ClampToFrame)));
   startPlug->addChild(new IntPlug(// [3][1]
     /*name=*/"frame",
     /*direction=*/Plug::In,
@@ -133,27 +126,31 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   endPlug->addChild(new IntPlug(// [4][0]
     /*name=*/"mode",
     /*direction=*/Plug::In,
-    /*defaultValue=*/static_cast<int>(FrameMaskMode::kNone),
-    /*minValue=*/static_cast<int>(FrameMaskMode::kNone),
-    /*maxValue=*/static_cast<int>(FrameMaskMode::kClampToFrame)));
+    /*defaultValue=*/static_cast<int>(FrameMaskMode::None),
+    /*minValue=*/static_cast<int>(FrameMaskMode::None),
+    /*maxValue=*/static_cast<int>(FrameMaskMode::ClampToFrame)));
   endPlug->addChild(new IntPlug(// [4][1]
     /*name=*/"frame",
     /*direction=*/Plug::In,
     /*defaultValue=*/0));
   addChild(endPlug);// [4]
 
-  addChild(new IntPlug(// [5]
-    /*name=*/"videoStreamIndex",
-    /*direction=*/Plug::In,
-    /*defaultValue=*/-1));
+  addChild(new StringPlug(// [5]
+    /*name=*/"colorSpace",
+    /*direction=*/Plug::In));
+
   addChild(new StringPlug(// [6]
+    /*name=*/"videoStream",
+    /*direction=*/Plug::In,
+    /*defaultValue=*/"best"));
+  addChild(new StringPlug(// [7]
     /*name=*/"filterGraph",
     /*direction=*/Plug::In,
     /*defaultValue=*/"vflip"));
 
-  addChild(new StringPlug(// [7]
-    /*name=*/"colorSpace",
-    /*direction=*/Plug::In));
+  // Please the LINTer, it doesn't like bit-wise operations on signed integer types.
+  constexpr auto kPlugDefault = static_cast<unsigned int>(Plug::Default);
+  constexpr auto kPlugSerialisable = static_cast<unsigned int>(Plug::Serialisable);
 
   addChild(new IntVectorDataPlug(// [8]
     /*name=*/"availableFrames",
@@ -165,23 +162,28 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     /*direction=*/Plug::Out,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
+  addChild(new StringPlug(// [10]
+    /*name=*/"probe",
+    /*direction=*/Plug::Out,
+    /*defaultValue=*/"",
+    /*flags=*/kPlugDefault & ~kPlugSerialisable));
 
-  addChild(new BoolPlug(// [10]
+  addChild(new BoolPlug(// [11]
     /*name=*/"__intermediateFileValid",
     /*direction=*/Plug::In,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new AtomicCompoundDataPlug(// [11]
+  addChild(new AtomicCompoundDataPlug(// [12]
     /*name=*/"__intermediateMetadata",
     /*direction=*/Plug::In,
     /*defaultValue=*/new IECore::CompoundData,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new StringPlug(// [12]
+  addChild(new StringPlug(// [13]
     /*name=*/"__intermediateColorSpace",
     /*direction=*/Plug::Out,
     /*defaultValue=*/"",
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new ImagePlug(// [13]
+  addChild(new ImagePlug(// [14]
     /*name=*/"__intermediateImage",
     /*direction=*/Plug::In,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
@@ -190,48 +192,54 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   // defer to internal nodes to do the hard work.
 
   AvReaderPtr avReader = new AvReader(/*name=*/"__avReader");
-  addChild(avReader);// [14]
+  addChild(avReader);// [15]
+  ColorSpacePtr colorSpace = new ColorSpace(/*name=*/"__colorSpace");
+  addChild(colorSpace);// [16]
+
+  // NOTE(tohi):
+  // Add all children before using the member functions to get
+  // the plugs so that we know that all indices are valid.
+
   avReader->fileNamePlug()->setInput(fileNamePlug());
   avReader->refreshCountPlug()->setInput(refreshCountPlug());
   avReader->missingFrameModePlug()->setInput(missingFrameModePlug());
-  avReader->videoStreamIndexPlug()->setInput(videoStreamIndexPlug());
+  avReader->videoStreamPlug()->setInput(videoStreamPlug());
   avReader->filterGraphPlug()->setInput(filterGraphPlug());
   _intermediateMetadataPlug()->setInput(avReader->outPlug()->metadataPlug());
   _intermediateFileValidPlug()->setInput(avReader->fileValidPlug());
 
-  ColorSpacePtr colorSpace = new ColorSpace(/*name=*/"__colorSpace");
-  addChild(colorSpace);// [15]
   colorSpace->inPlug()->setInput(avReader->outPlug());
   colorSpace->inputSpacePlug()->setInput(_intermediateColorSpacePlug());
   colorSpace->processUnpremultipliedPlug()->setValue(true);
   _intermediateImagePlug()->setInput(colorSpace->outPlug());
 
   availableFramesPlug()->setInput(avReader->availableFramesPlug());
+  probePlug()->setInput(avReader->probePlug());
 }
 
 // clang-format off
 // NOLINTNEXTLINE
-#define PLUG_MEMBER_IMPL(name, type, index)          \
-  type *MovieReader::name()                          \
-  {                                                  \
-    return getChild<type>(FirstPlugIndex + (index)); \
-  }                                                  \
-  const type *MovieReader::name() const              \
-  {                                                  \
-    return getChild<type>(FirstPlugIndex + (index)); \
+#define PLUG_MEMBER_IMPL(name, type, index)            \
+  type *MovieReader::name()                            \
+  {                                                    \
+    return getChild<type>(g_FirstPlugIndex + (index)); \
+  }                                                    \
+  const type *MovieReader::name() const                \
+  {                                                    \
+    return getChild<type>(g_FirstPlugIndex + (index)); \
   }
 
 // NOLINTNEXTLINE
-#define PLUG_MEMBER_IMPL_SUB(name, type, index, sub_index)         \
-  type *MovieReader::name()                                        \
-  {                                                                \
-    return getChild<Gaffer::ValuePlug>(FirstPlugIndex + (index))   \
-      ->getChild<type>(sub_index);                                 \
-  }                                                                \
-  const type *MovieReader::name() const                            \
-  {                                                                \
-    return getChild<Gaffer::ValuePlug>(FirstPlugIndex + (index))   \
-      ->getChild<type>(sub_index);                                 \
+#define PLUG_MEMBER_IMPL_SUB(name, type, index, sub_index)           \
+  type *MovieReader::name()                                          \
+  {                                                                  \
+    return getChild<Gaffer::ValuePlug>(g_FirstPlugIndex + (index))   \
+      ->getChild<type>(sub_index);                                   \
+  }                                                                  \
+  const type *MovieReader::name() const                              \
+  {                                                                  \
+    return getChild<Gaffer::ValuePlug>(g_FirstPlugIndex + (index))   \
+      ->getChild<type>(sub_index);                                   \
   }
 // clang-format on
 
@@ -242,22 +250,23 @@ PLUG_MEMBER_IMPL_SUB(startModePlug, Gaffer::IntPlug, 3U, 0U);
 PLUG_MEMBER_IMPL_SUB(startFramePlug, Gaffer::IntPlug, 3U, 1U);
 PLUG_MEMBER_IMPL_SUB(endModePlug, Gaffer::IntPlug, 4U, 0U);
 PLUG_MEMBER_IMPL_SUB(endFramePlug, Gaffer::IntPlug, 4U, 1U);
+PLUG_MEMBER_IMPL(colorSpacePlug, Gaffer::StringPlug, 5U);
 
-PLUG_MEMBER_IMPL(videoStreamIndexPlug, Gaffer::IntPlug, 5U);
-PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 6U);
+PLUG_MEMBER_IMPL(videoStreamPlug, Gaffer::StringPlug, 6U);
+PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 7U);
 
-PLUG_MEMBER_IMPL(colorSpacePlug, Gaffer::StringPlug, 7U);
 PLUG_MEMBER_IMPL(availableFramesPlug, Gaffer::IntVectorDataPlug, 8U);
 PLUG_MEMBER_IMPL(fileValidPlug, Gaffer::BoolPlug, 9U);
+PLUG_MEMBER_IMPL(probePlug, Gaffer::StringPlug, 10U);
 
-PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 10U);
-PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 11U);
-PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 12U);
-PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 13U);
+PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 11U);
+PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 12U);
+PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 13U);
+PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 14U);
 
 // Not really plugs, but follow the same pattern (they are also children).
-PLUG_MEMBER_IMPL(_avReader, AvReader, 14U);
-PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 15U);
+PLUG_MEMBER_IMPL(_avReader, AvReader, 15U);
+PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 16U);
 
 #undef PLUG_MEMBER_IMPL
 #undef PLUG_MEMBER_IMPL_SUB
@@ -292,90 +301,80 @@ void MovieReader::affects(const Gaffer::Plug *input, AffectedPlugsContainer &out
   using ValuePlug = Gaffer::ValuePlug;
   using ImagePlug = GafferImage::ImagePlug;
 
-
+  // clang-format off
   ImageNode::affects(input, /*out*/ outputs);
   if (input == _intermediateFileValidPlug()) {
-    TRACE("MovieReader", "affects - _intermediateFileValidPlug");
-
+    //TRACE("MovieReader", "affects - _intermediateFileValidPlug");
     outputs.push_back(fileValidPlug());
   } else if (input == _intermediateMetadataPlug() || input == colorSpacePlug()) {
-    TRACE("MovieReader", "affects - _intermediateMetadataPlug | colorSpacePlug");
-
+    //TRACE("MovieReader", "affects - _intermediateMetadataPlug | colorSpacePlug");
     outputs.push_back(_intermediateColorSpacePlug());
   } else if (input->parent<ImagePlug>() == _intermediateImagePlug()) {
     outputs.push_back(outPlug()->getChild<ValuePlug>(input->getName()));
-  } else if (
-    // clang-format off
-    input == startFramePlug() || 
-    input == startModePlug() || 
-    input == endFramePlug() || 
-    input == endModePlug()
-    // clang-format on
-  ) {
-    TRACE("MovieReader", "affects - start | end");
-
-    // outputs.push_back(fileValidPlug());
-    for (ValuePlug::Iterator it{ outPlug() }; !it.done(); ++it) { outputs.push_back(it->get()); }
+  } else if (input == startFramePlug() || input == startModePlug() || 
+             input == endFramePlug()   || input == endModePlug()) {
+    //TRACE("MovieReader", "affects - start | end");
+    outputs.push_back(fileValidPlug());
+    for (ValuePlug::Iterator it{ outPlug() }; !it.done(); ++it) { 
+      outputs.push_back(it->get()); 
+    }
   }
+  // clang-format on
 }
 
 void MovieReader::hash(const Gaffer::ValuePlug *output,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
-  namespace OCIOAlgo = GafferImage::OpenColorIOAlgo;
-
   ImageNode::hash(output, context, /*out*/ h);
 
   if (output == _intermediateColorSpacePlug()) {
-    TRACE("MovieReader", "hash - _intermediateColorSpacePlug");
-
+    // TRACE("MovieReader", "hash - _intermediateColorSpacePlug");
     _intermediateMetadataPlug()->hash(/*out*/ h);
     colorSpacePlug()->hash(/*out*/ h);
     fileNamePlug()->hash(/*out*/ h);
-    videoStreamIndexPlug()->hash(/*out*/ h);
-    h.append(OCIOAlgo::currentConfigHash());
+    videoStreamPlug()->hash(/*out*/ h);
+    h.append(GafferImage::OpenColorIOAlgo::currentConfigHash());
   } else if (output == fileValidPlug()) {
-    TRACE("MovieReader", "hash - fileValid");
-
-    // const FrameMaskScope scope(context, this, /*clampBlack=*/true);
+    // TRACE("MovieReader", "hash - fileValid");
+    const FrameMaskScope scope(context, this, /*clampBlack=*/true);
     _avReader()->fileValidPlug()->hash(/*out*/ h);
   }
 }
 
 void MovieReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *context) const
 {
-
-  using ConstCompoundDataPtr = IECore::ConstCompoundDataPtr;
-  using StringData = IECore::StringData;
+  // using ConstCompoundDataPtr = IECore::ConstCompoundDataPtr;
+  // using StringData = IECore::StringData;
   using StringPlug = Gaffer::StringPlug;
   using BoolPlug = Gaffer::BoolPlug;
-  namespace OCIOAlgo = GafferImage::OpenColorIOAlgo;
 
   if (output == _intermediateColorSpacePlug()) {
-    TRACE("MovieReader", "compute - _intermediateColorSpacePlug");
+    // TRACE("MovieReader", "compute - _intermediateColorSpacePlug");
 
     std::string colorSpace = colorSpacePlug()->getValue();
-    if (colorSpace.empty()) {
-      ConstCompoundDataPtr metadata = _intermediateMetadataPlug()->getValue();
-      if (const auto *const fileFormatData = metadata->member<StringData>("fileFormat")) {
-        const auto *const dataTypeData = metadata->member<StringData>("dataType");
-        colorSpace = _defaultColorSpaceFunction()(fileNamePlug()->getValue(),
-          fileFormatData->readable(),
-          dataTypeData != nullptr ? dataTypeData->readable() : "",
-          metadata.get(),
-          OCIOAlgo::currentConfig());
-      }
-    }
-    static_cast<StringPlug *>(output)->setValue(colorSpace);// NOLINT
-  } else if (output == fileValidPlug()) {
-    TRACE("MovieReader", "compute - fileValid");
+    TRACE("MovieReader", boost::str(boost::format("colorSpace = %1%") % colorSpace));
 
-    // const FrameMaskScope scope(context, this, /*clampBlack=*/true);
+    if (colorSpace.empty()) {
+      // ConstCompoundDataPtr metadata = _intermediateMetadataPlug()->getValue();
+      // if (const auto *const fileFormatData = metadata->member<StringData>("fileFormat")) {
+      // const auto *const dataTypeData = metadata->member<StringData>("dataType");
+      colorSpace = _defaultColorSpaceFunction()("hej.png",// fileNamePlug()->getValue(),
+        "png",// fileFormatData->readable(),
+        "",// dataTypeData != nullptr ? dataTypeData->readable() : "",
+        nullptr,// metadata.get(),
+        GafferImage::OpenColorIOAlgo::currentConfig());
+      //}
+    }
+    TRACE("MovieReader", boost::str(boost::format("colorSpace = %1%") % colorSpace));
+    static_cast<StringPlug *>(output)->setValue(colorSpace);// NOLINT
+    // static_cast<StringPlug *>(output)->setValue("");// NOLINT
+  } else if (output == fileValidPlug()) {
+    // TRACE("MovieReader", "compute - fileValid");
+    const FrameMaskScope scope(context, this, /*clampBlack=*/true);
     static_cast<BoolPlug *>(output)->setValue(_avReader()->fileValidPlug()->getValue());// NOLINT
   } else {
-    //TRACE("MovieReader", "compute - ImageNode");
-
+    // TRACE("MovieReader", "compute - ImageNode");
     ImageNode::compute(output, context);
   }
 }
@@ -391,8 +390,7 @@ void MovieReader::hashViewNames(const GafferImage::ImagePlug * /*parent*/,
 IECore::ConstStringVectorDataPtr MovieReader::computeViewNames(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeViewNames");
-
+  // TRACE("MovieReader", "computeViewNames");
   const FrameMaskScope scope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->viewNamesPlug()->getValue();
 }
@@ -408,8 +406,7 @@ void MovieReader::hashFormat(const GafferImage::ImagePlug * /*parent*/,
 GafferImage::Format MovieReader::computeFormat(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeFormat");
-
+  // TRACE("MovieReader", "computeFormat");
   const FrameMaskScope scope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->formatPlug()->getValue();
 }
@@ -425,8 +422,7 @@ void MovieReader::hashDataWindow(const GafferImage::ImagePlug * /*parent*/,
 Imath::Box2i MovieReader::computeDataWindow(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeDataWindow");
-
+  // TRACE("MovieReader", "computeDataWindow");
   const FrameMaskScope scope{ context, this, /*clampBlack=*/true };
   return _intermediateImagePlug()->dataWindowPlug()->getValue();
 }
@@ -436,7 +432,7 @@ void MovieReader::hashMetadata(const GafferImage::ImagePlug * /*parent*/,
   IECore::MurmurHash &h) const
 {
   const FrameMaskScope scope{ context, this };
-  h = scope.mode() == FrameMaskMode::kBlackOutside
+  h = scope.mode() == FrameMaskMode::BlackOutside
         ? _intermediateImagePlug()->metadataPlug()->defaultValue()->Object::hash()
         : _intermediateImagePlug()->metadataPlug()->hash();
 }
@@ -444,10 +440,9 @@ void MovieReader::hashMetadata(const GafferImage::ImagePlug * /*parent*/,
 IECore::ConstCompoundDataPtr MovieReader::computeMetadata(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeMetadata");
-
+  // TRACE("MovieReader", "computeMetadata");
   const FrameMaskScope scope{ context, this };
-  return scope.mode() == FrameMaskMode::kBlackOutside
+  return scope.mode() == FrameMaskMode::BlackOutside
            ? _intermediateImagePlug()->metadataPlug()->defaultValue()
            : _intermediateImagePlug()->metadataPlug()->getValue();
 }
@@ -456,8 +451,13 @@ void MovieReader::hashDeep(const GafferImage::ImagePlug *parent,
   const Gaffer::Context *context,
   IECore::MurmurHash &h) const
 {
+  // NOTE(tohi):
+  // See comment in computeDeep(...) function below, it's possible
+  // that we should "do nothing" here, and claim that "deep" is not
+  // supported for video frames.
+
   const FrameMaskScope scope{ context, this };
-  if (scope.mode() == FrameMaskMode::kBlackOutside) {
+  if (scope.mode() == FrameMaskMode::BlackOutside) {
     ImageNode::hashDeep(parent, context, h);
   } else {
     h = _intermediateImagePlug()->deepPlug()->hash();
@@ -467,15 +467,14 @@ void MovieReader::hashDeep(const GafferImage::ImagePlug *parent,
 bool MovieReader::computeDeep(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeDeep");
+  // NOTE(tohi):
+  // Should we just return 'false' and claim that "deep" is not
+  // appilcable to video frames?
 
   const FrameMaskScope scope{ context, this };
-  return scope.mode() == FrameMaskMode::kBlackOutside
+  return scope.mode() == FrameMaskMode::BlackOutside
            ? _intermediateImagePlug()->deepPlug()->defaultValue()
            : _intermediateImagePlug()->deepPlug()->getValue();
-
-  // ??
-  // return false;
 }
 
 void MovieReader::hashSampleOffsets(const GafferImage::ImagePlug * /*parent*/,
@@ -483,7 +482,7 @@ void MovieReader::hashSampleOffsets(const GafferImage::ImagePlug * /*parent*/,
   IECore::MurmurHash &h) const
 {
   const FrameMaskScope scope{ context, this };
-  h = scope.mode() == FrameMaskMode::kBlackOutside
+  h = scope.mode() == FrameMaskMode::BlackOutside
         ? _intermediateImagePlug()->sampleOffsetsPlug()->defaultValue()->Object::hash()
         : _intermediateImagePlug()->sampleOffsetsPlug()->hash();
 }
@@ -492,10 +491,9 @@ IECore::ConstIntVectorDataPtr MovieReader::computeSampleOffsets(const Imath::V2i
   const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeSampleOffsets");
-
+  // TRACE("MovieReader", "computeSampleOffsets");
   const FrameMaskScope scope{ context, this };
-  return scope.mode() == FrameMaskMode::kBlackOutside
+  return scope.mode() == FrameMaskMode::BlackOutside
            ? _intermediateImagePlug()->sampleOffsetsPlug()->defaultValue()
            : _intermediateImagePlug()->sampleOffsetsPlug()->getValue();
 }
@@ -505,7 +503,7 @@ void MovieReader::hashChannelNames(const GafferImage::ImagePlug * /*parent*/,
   IECore::MurmurHash &h) const
 {
   const FrameMaskScope scope{ context, this };
-  h = scope.mode() == FrameMaskMode::kBlackOutside
+  h = scope.mode() == FrameMaskMode::BlackOutside
         ? _intermediateImagePlug()->channelNamesPlug()->defaultValue()->Object::hash()
         : _intermediateImagePlug()->channelNamesPlug()->hash();
 }
@@ -513,10 +511,9 @@ void MovieReader::hashChannelNames(const GafferImage::ImagePlug * /*parent*/,
 IECore::ConstStringVectorDataPtr MovieReader::computeChannelNames(const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeChannelNames");
-
+  // TRACE("MovieReader", "computeChannelNames");
   const FrameMaskScope scope{ context, this };
-  return scope.mode() == FrameMaskMode::kBlackOutside
+  return scope.mode() == FrameMaskMode::BlackOutside
            ? _intermediateImagePlug()->channelNamesPlug()->defaultValue()
            : _intermediateImagePlug()->channelNamesPlug()->getValue();
 }
@@ -526,21 +523,19 @@ void MovieReader::hashChannelData(const GafferImage::ImagePlug * /*parent*/,
   IECore::MurmurHash &h) const
 {
   const FrameMaskScope scope{ context, this };
-  h = scope.mode() == FrameMaskMode::kBlackOutside
+  h = scope.mode() == FrameMaskMode::BlackOutside
         ? _intermediateImagePlug()->channelDataPlug()->defaultValue()->Object::hash()
         : _intermediateImagePlug()->channelDataPlug()->hash();
 }
-
 
 IECore::ConstFloatVectorDataPtr MovieReader::computeChannelData(const std::string & /*channelName*/,
   const Imath::V2i & /*tileOrigin*/,
   const Gaffer::Context *context,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  TRACE("MovieReader", "computeChannelData");
-
+  // TRACE("MovieReader", "computeChannelData");
   const FrameMaskScope scope{ context, this };
-  return scope.mode() == FrameMaskMode::kBlackOutside
+  return scope.mode() == FrameMaskMode::BlackOutside
            ? _intermediateImagePlug()->channelDataPlug()->defaultValue()
            : _intermediateImagePlug()->channelDataPlug()->getValue();
 }

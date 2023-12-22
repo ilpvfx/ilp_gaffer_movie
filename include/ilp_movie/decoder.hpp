@@ -3,6 +3,7 @@
 #include <cstddef>// std::size_t
 #include <cstdint>// int64_t, etc.
 #include <memory>// std::unique_ptr
+#include <optional>// std::optional
 #include <string>// std::string
 #include <vector>// std::vector
 
@@ -42,6 +43,8 @@ struct InputVideoStreamHeader
   const char *color_range_name;
   const char *color_space_name;
   const char *color_primaries_name;
+
+  std::string description;
 };
 
 struct DecodedVideoFrame
@@ -107,6 +110,8 @@ public:
   // is not in an open state.
   [[nodiscard]] auto Url() const noexcept -> const std::string &;
 
+  [[nodiscard]] auto Probe() const noexcept -> const std::string &;
+
   // Reset the state of the decoder, clearing all cached information putting the
   // decoder in a state as if no file has been opened.
   void Close() noexcept;
@@ -122,6 +127,10 @@ public:
   // Note that some properties, such as pixel format, may differ from the decoded frames,
   // since those are potentially pushed through a filter graph.
   [[nodiscard]] auto VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &;
+
+
+  [[nodiscard]] auto VideoStreamHeader(int stream_index) const
+    -> std::optional<InputVideoStreamHeader>;
 
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool;

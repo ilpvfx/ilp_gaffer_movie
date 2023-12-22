@@ -224,10 +224,10 @@ auto SeekFrames(ilp_movie::Decoder &decoder, const int frame_count) -> std::vect
 
     {// Debug.
       std::ostringstream oss;
-      oss << "Frame " << frame_nb << "\n"
-          << "r | avg: " << fs.r_avg_err << ", max: " << fs.r_max_err << "\n"
-          << "g | avg: " << fs.g_avg_err << ", max: " << fs.g_max_err << "\n"
-          << "b | avg: " << fs.b_avg_err << ", max: " << fs.b_max_err << "\n";
+      oss << "Frame " << frame_nb << " | "
+          << "r_avg: " << fs.r_avg_err << ", r_max: " << fs.r_max_err << " | "
+          << "g_avg: " << fs.g_avg_err << ", g_max: " << fs.g_max_err << " | "
+          << "b_avg: " << fs.b_avg_err << ", b_max: " << fs.b_max_err << "\n";
       ilp_movie::LogMsg(ilp_movie::LogLevel::kInfo, oss.str().c_str());
     }
     frame_stats.push_back(fs);
@@ -238,8 +238,11 @@ auto SeekFrames(ilp_movie::Decoder &decoder, const int frame_count) -> std::vect
 TEST_CASE("seek(prores)")
 {
   std::vector<std::string> log_lines = {};
-  ilp_movie::SetLogCallback(
-    [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
+  ilp_movie::SetLogCallback([&log_lines](int level, const char *s) {
+    std::ostringstream oss;
+    oss << "[ilp_movie][" << ilp_movie::LogLevelString(level) << "] " << s;
+    log_lines.emplace_back(oss.str());
+  });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
 
   const auto dump_log_on_fail = [&](const bool cond) {
@@ -358,8 +361,16 @@ std::once_flag write_h264{};
 TEST_CASE("seek(h.264)")
 {
   std::vector<std::string> log_lines = {};
-  ilp_movie::SetLogCallback(
-    [&](int /*level*/, const char *s) { log_lines.emplace_back(std::string{ s }); });
+  ilp_movie::SetLogCallback([&log_lines](const int level, const char *s) {
+    std::string str{ s };
+    if (!str.empty() && *str.rbegin() == '\n') {
+      std::ostringstream oss;
+      oss << "[ilp_movie][" << ilp_movie::LogLevelString(level) << "] " << str;
+      str = oss.str();
+    }
+
+    log_lines.emplace_back(std::move(str));
+  });
   ilp_movie::SetLogLevel(ilp_movie::LogLevel::kInfo);
 
   const auto dump_log_on_fail = [&](const bool cond) {
@@ -443,19 +454,19 @@ TEST_CASE("seek(h.264)")
     REQUIRE(dump_log_on_fail(d1.BestVideoStreamIndex() == 0));
     const int stream_index = 0;
 
-//     REQUIRE(dump_log_on_fail(d0.SetFilterGraph(stream_index,
-// #if 0
-//       /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709, vflip",
-//       /*sws_flags=*/"flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"
-// #else
-//       /*filter_descr=*/
-//       "scale=in_color_matrix=bt709:out_color_matrix=bt709:flags=spline+accurate_rnd+full_chroma_"
-//       "int+full_chroma_inp, vflip"
-// #endif
-//       )));
-//     REQUIRE(dump_log_on_fail(d1.SetFilterGraph(stream_index,
-//       /*filter_descr=*/
-//       "scale=w=in_w/2:h=in_h/2:flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp")));
+    //     REQUIRE(dump_log_on_fail(d0.SetFilterGraph(stream_index,
+    // #if 0
+    //       /*filter_descr=*/"scale=in_color_matrix=bt709:out_color_matrix=bt709, vflip",
+    //       /*sws_flags=*/"flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp"
+    // #else
+    //       /*filter_descr=*/
+    //       "scale=in_color_matrix=bt709:out_color_matrix=bt709:flags=spline+accurate_rnd+full_chroma_"
+    //       "int+full_chroma_inp, vflip"
+    // #endif
+    //       )));
+    //     REQUIRE(dump_log_on_fail(d1.SetFilterGraph(stream_index,
+    //       /*filter_descr=*/
+    //       "scale=w=in_w/2:h=in_h/2:flags=spline+accurate_rnd+full_chroma_int+full_chroma_inp")));
 
     int fail0 = -1;
     int fail1 = -1;
@@ -490,7 +501,7 @@ TEST_CASE("seek(h.264)")
     REQUIRE(dump_log_on_fail(fail1 == -1));
   }
 
-  // dump_log_on_fail(false);// TMP!!
+  dump_log_on_fail(false);// TMP!!
 }
 
 TEST_CASE("supported formats")

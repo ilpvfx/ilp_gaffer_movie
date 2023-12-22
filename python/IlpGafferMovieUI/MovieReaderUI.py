@@ -18,7 +18,8 @@ Gaffer.Metadata.registerNode(
 	"description",
 	"""
 	Reads video files from disk using libav (the FFmpeg backend). All file
-	types supported by libav are supported by the MovieReader.
+	types supported by libav are supported by the MovieReader and all channel
+	data will be converted to linear using OpenColorIO.
 	""",
 
 	plugs = {
@@ -80,7 +81,8 @@ Gaffer.Metadata.registerNode(
 			"description",
 			"""
 			Masks frames which preceed the specified start frame.
-			They can be clamped to the start frame, or return a 
+			The default is to treat them based on the MissingFrameMode,
+			but they can be clamped to the start frame, or return a 
 			black image which matches the data window and display 
 			window of the start frame.
 			""",
@@ -129,7 +131,8 @@ Gaffer.Metadata.registerNode(
 			"description",
 			"""
 			Masks frames which follow the specified end frame.
-			They can be clamped to the end frame, or eturn a 
+			The default is to treat them based on the MissingFrameMode,
+			but they can be clamped to the end frame, or return a 
 			black image which matches the data window and display 
 			window of the end frame.
 			""",
@@ -173,21 +176,36 @@ Gaffer.Metadata.registerNode(
 
 		],
 
-		"videoStreamIndex" : [
+		"colorSpace" : [
 
 			"description",
 			"""
-			The index of the video stream to be read. 
+			The colour space of the input frame, used to convert the input to
+			the working space. When set to `Automatic`, the colour space is
+			determined automatically using the function registered with
+			`MovieReader::setDefaultColorSpaceFunction()`.
 			""",
-			#"presetNames", lambda plug : IECore.StringVectorData( [ str(x) for x in plug.node()["__avReader"]["availableStreamInfo"].getValue() ] ),
-			"presetNames", lambda plug : plug.node()["__avReader"]["availableVideoStreamInfo"].getValue(),
-			"presetValues", lambda plug : plug.node()["__avReader"]["availableVideoStreamIndices"].getValue(),
 
-			# "presetNames", IECore.StringVectorData( [ "best (stream #0)", "stream #0", "stream #1" ] ),
-			# "presetValues", IECore.IntVectorData( [ 0, 0, 1] ),
+			"presetNames", OpenColorIOTransformUI.colorSpacePresetNames,
+			"presetValues", OpenColorIOTransformUI.colorSpacePresetValues,
+			"openColorIO:categories", "file-io",
+			"openColorIO:extraPresetNames", IECore.StringVectorData( [ "Automatic" ] ),
+			"openColorIO:extraPresetValues", IECore.StringVectorData( [ "" ] ),
 
-			#"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._VideoStreamPlugValueWidget",
-			"plugValueWidget:type", "GafferUI.PresetsPlugValueWidget",
+			"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._ColorSpacePlugValueWidget",
+
+		],
+
+		"videoStream" : [
+
+			"description",
+			"""
+			The video stream to be read. By default try to read the 'best' stream, as suggested 
+			by the decoder. To read a specific video stream provide a value on the form 'N',
+			where N is an integer corresponding to the stream index, e.g. '1'.
+			""",
+
+			"label", "Video Stream",
 
 		],
 
@@ -200,27 +218,11 @@ Gaffer.Metadata.registerNode(
 			""",
 
 			"label", "Filter Graph",
-		],
-
-		"colorSpace" : [
-
-			"description",
-			"""
-			The colour space of the input image, used to convert the input to
-			the working space. When set to `Automatic`, the colour space is
-			determined automatically using the function registered with
-			`ImageReader::setDefaultColorSpaceFunction()`.
-			""",
-
-			"presetNames", OpenColorIOTransformUI.colorSpacePresetNames,
-			"presetValues", OpenColorIOTransformUI.colorSpacePresetValues,
-			"openColorIO:categories", "file-io",
-			"openColorIO:extraPresetNames", IECore.StringVectorData( [ "Automatic" ] ),
-			"openColorIO:extraPresetValues", IECore.StringVectorData( [ "" ] ),
-
-			"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._ColorSpacePlugValueWidget",
+			"plugValueWidget:type", "GafferUI.MultiLineStringPlugValueWidget",
 
 		],
+
+		# section: Frames
 
 		"availableFrames" : [
 
@@ -235,17 +237,32 @@ Gaffer.Metadata.registerNode(
 		],
 
 		"fileValid" : [
+
 			"description",
 			"""
-			Whether or not the file exists and can be read into memory. Behaviour 
-			changes	if a frame mask of ClampToFrame or Black is selected, if outside
-			the frame mask fileValid will be set to True if the nearest frame is valid.
+			Whether or not the file exists and can be read into memory. Additionally, the 
+			file must contain at least one video stream.
 			""",
 
 			"layout:section", "Frames",
+
+		],
+
+		"probe" : [
+			"description",
+			"""
+			Information about the video file, the output is similar to that from
+			ffprobe.
+			""",
+
+			"layout:section", "Frames",
+			"plugValueWidget:type", "GafferUI.MultiLineStringPlugValueWidget",
+			"label", "Probe",
+
 		]
 
 	}
+
 )
 
 # Augments PresetsPlugValueWidget label with the computed colour space
@@ -292,47 +309,6 @@ class _ColorSpacePlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
 		node = plug.node()
 		if isinstance( node, IlpGafferMovie.MovieReader ) :
 			return [ node["__intermediateColorSpace"] ]
-
-
-class _VideoStreamIndexPlugValueWidget( GafferUI.PresetsPlugValueWidget ) :
-
-	def __init__( self, plug, **kw ) :
-
-		# self.__textWidget = GafferUI.TextWidget( editable = False )
-		GafferUI.PlugValueWidget.__init__( self, self.__textWidget, plug, **kw )
-
-	@staticmethod
-	def _valuesForUpdate( plugs, auxiliaryPlugs ) :
-
-		presets = GafferUI.PresetsPlugValueWidget._valuesForUpdate( plugs, [ [] for p in plugs ] )
-
-		result = []
-		for preset, colorSpacePlugs in zip( presets, auxiliaryPlugs ) :
-
-			bestStream = ""
-			if len( colorSpacePlugs ) and preset == "Best" :
-				with IECore.IgnoredExceptions( Gaffer.ProcessException ) :
-					automaticSpace = colorSpacePlugs[0].getValue() or "Working Space"
-
-			result.append( {
-				"preset" : preset,
-				"automaticSpace" : automaticSpace
-			} )
-
-		return result
-
-	def _updateFromValues( self, values, exception ) :
-
-		if not len( values ): 
-			self.__textWidget.setText( "---" )
-
-		self.__textWidget.setErrored( exception is not None )
-
-	def _auxiliaryPlugs( self, plug ) :
-
-		node = plug.node()
-		if isinstance( node, IlpGafferMovie.MovieReader ) :
-			return [ node["__avReader"] ]
 
 
 class _AvailableFramesPlugValueWidget( GafferUI.PlugValueWidget ) :

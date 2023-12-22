@@ -44,16 +44,14 @@ public:
   // Number of times the node has been refreshed.
   PLUG_MEMBER_DECL(refreshCountPlug, Gaffer::IntPlug);
 
-  PLUG_MEMBER_DECL(videoStreamIndexPlug, Gaffer::IntPlug);
-  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
-
   PLUG_MEMBER_DECL(missingFrameModePlug, Gaffer::IntPlug);
 
-  PLUG_MEMBER_DECL(availableVideoStreamInfoPlug, Gaffer::StringVectorDataPlug);
-  PLUG_MEMBER_DECL(availableVideoStreamIndicesPlug, Gaffer::IntVectorDataPlug);
+  PLUG_MEMBER_DECL(videoStreamPlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(filterGraphPlug, Gaffer::StringPlug);
 
   PLUG_MEMBER_DECL(availableFramesPlug, Gaffer::IntVectorDataPlug);
   PLUG_MEMBER_DECL(fileValidPlug, Gaffer::BoolPlug);
+  PLUG_MEMBER_DECL(probePlug, Gaffer::StringPlug);
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
 
@@ -119,14 +117,13 @@ protected:
     const GafferImage::ImagePlug *parent) const override;
 
 private:
+  std::optional<int> _videoStreamIndex(const Gaffer::Context *context) const;
+  std::string _filterGraph(const Gaffer::Context *context) const;
+
   std::shared_ptr<void> _retrieveDecoder(const Gaffer::Context *context) const;
 
-  std::shared_ptr<void> _retrieveFrame(
-    const Gaffer::Context *context /*, bool holdForBlack = false*/) const;
-
-  //PLUG_MEMBER_DECL(_tileBatchPlug, Gaffer::ObjectVectorPlug);
-
-  void _hashFileName(const Gaffer::Context *context, IECore::MurmurHash &h) const;
+  std::shared_ptr<void> _retrieveFrame(const Gaffer::Context *context,
+    bool holdForBlack = false) const;
 
   void _plugSet(Gaffer::Plug *plug);
 

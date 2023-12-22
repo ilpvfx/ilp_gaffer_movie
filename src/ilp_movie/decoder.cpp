@@ -3,7 +3,7 @@
 #include <cassert>// assert
 #include <cstring>// std::memcpy
 #include <map>// std::map
-#include <sstream>// std::istringstream
+#include <sstream>// std::istringstream, std::ostringstream
 
 #include <ilp_movie/pixel_data.hpp>
 #include <internal/filter_graph.hpp>
@@ -357,8 +357,6 @@ public:
           return exit_func(/*success=*/false);
         }
 
-        av_dump_format(_av_fmt_ctx, stream_index, _url.c_str(), /*is_output=*/0);
-
         // Create filter graph for video stream.
         // Each video stream requires its own filter graph instance since the inputs
         // configuerd from the codec/stream parameters.
@@ -384,29 +382,30 @@ public:
 
         // Populate video stream header information.
         // clang-format off
-        InputVideoStreamHeader ivsh{};
-        ivsh.stream_index = video_stream->Get()->index;
-        ivsh.is_best = (ivsh.stream_index == _best_video_stream);
-        ivsh.width = video_stream->CodecContext()->width;
-        ivsh.height = video_stream->CodecContext()->height;
-        ivsh.frame_rate = { 
+        InputVideoStreamHeader hdr{};
+        hdr.stream_index = video_stream->Get()->index;
+        hdr.is_best = (hdr.stream_index == _best_video_stream);
+        hdr.width = video_stream->CodecContext()->width;
+        hdr.height = video_stream->CodecContext()->height;
+        hdr.frame_rate = { 
           /*.num=*/video_stream->FrameRate().num,
           /*.den=*/video_stream->FrameRate().den };
-        ivsh.pixel_aspect_ratio = { 
+        hdr.pixel_aspect_ratio = { 
           /*.num=*/video_stream->CodecContext()->sample_aspect_ratio.num,
           /*.den=*/video_stream->CodecContext()->sample_aspect_ratio.den };
-        ivsh.first_frame_nb = 1;// Good??
-        ivsh.frame_count = video_stream->FrameCount();
-        ivsh.pix_fmt_name = 
+        hdr.first_frame_nb = 1;// Good??
+        hdr.frame_count = video_stream->FrameCount();
+        hdr.pix_fmt_name = 
           av_get_pix_fmt_name(video_stream->CodecContext()->pix_fmt);
-        ivsh.color_range_name = 
+        hdr.color_range_name = 
           av_color_range_name(video_stream->CodecContext()->color_range);
-        ivsh.color_space_name = 
+        hdr.color_space_name = 
           av_color_space_name(video_stream->CodecContext()->colorspace);
-        ivsh.color_primaries_name =
+        hdr.color_primaries_name =
           av_color_primaries_name(video_stream->CodecContext()->color_primaries);
-        _video_stream_headers.push_back(ivsh);
         // clang-format on
+
+        _video_stream_headers.push_back(hdr);
 
         _video_streams[stream_index] = { std::move(video_stream), std::move(fg) };
       }
@@ -419,16 +418,31 @@ public:
       return exit_func(/*success=*/false);
     }
 
+    _probe = std::invoke([&]() {
+      const auto push_cb = GetLogCallback();
+      const int push_log_level = GetLogLevel();
+      std::ostringstream oss;
+      SetLogCallback([&oss](const int /*level*/, const char *s) { oss << s; });
+      SetLogLevel(LogLevel::kInfo);
+      av_dump_format(_av_fmt_ctx, /*index=*/0, _url.c_str(), /*is_output=*/0);
+      oss << "\nBest video stream: " << _best_video_stream << "\n";
+      SetLogCallback(push_cb);
+      SetLogLevel(push_log_level);
+      return oss.str();
+    });
+
     return exit_func(/*success=*/true);
   }
 
   [[nodiscard]] auto IsOpen() const noexcept -> bool { return !_url.empty(); }
 
   [[nodiscard]] auto Url() const noexcept -> const std::string & { return _url; }
+  [[nodiscard]] auto Probe() const noexcept -> const std::string & { return _probe; }
 
   void Close()
   {
     _url.clear();
+    _probe.clear();
     if (_av_fmt_ctx != nullptr) {
       avformat_close_input(&_av_fmt_ctx);
       assert(_av_fmt_ctx == nullptr);// NOLINT
@@ -450,16 +464,35 @@ public:
     return _video_stream_headers;
   }
 
+  [[nodiscard]] auto VideoStreamHeader(const int stream_index) const
+    -> std::optional<InputVideoStreamHeader>
+  {
+    if (_video_stream_headers.empty()) { return std::nullopt; }
+
+    const int index = stream_index == -1 ? _best_video_stream : stream_index;
+    if (index < 0) { return std::nullopt; }
+
+    // Linear search.
+    for (auto &&h : _video_stream_headers) {
+      if (h.stream_index == index) { return h; }
+    }
+
+    // No suitable header found.
+    return std::nullopt;
+  }
+
+
   [[nodiscard]] auto
     DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool
   {
+    const int index = stream_index == -1 ? _best_video_stream : stream_index;
+
     Stream *stream = nullptr;
     filter_graph_internal::FilterGraph *filter_graph = nullptr;
-    if (const auto fs_iter = _video_streams.find(stream_index); fs_iter != _video_streams.end()) {
+    if (const auto fs_iter = _video_streams.find(index); fs_iter != _video_streams.end()) {
       stream = fs_iter->second.stream.get();
       filter_graph = fs_iter->second.filter_graph.get();
     } else {
-      // TODO: log warning
       LogMsg(LogLevel::kWarning, "Bad stream index for decoding video frame\n");
       return false;
     }
@@ -467,9 +500,7 @@ public:
     assert(filter_graph != nullptr);// NOLINT
 
     // Check if frame exists in stream.
-    if (!(1 <= frame_nb && frame_nb <= stream->FrameCount())) {
-      return false;
-    }
+    if (!(1 <= frame_nb && frame_nb <= stream->FrameCount())) { return false; }
 
     const int64_t timestamp = stream->FrameToPts(frame_nb - 1);
 
@@ -582,6 +613,7 @@ public:
 
 private:
   std::string _url;
+  std::string _probe;
 
   AVFormatContext *_av_fmt_ctx = nullptr;
   AVPacket *_av_packet = nullptr;
@@ -617,6 +649,7 @@ auto Decoder::Open(const std::string &url, const DecoderFilterGraphDescription &
 auto Decoder::IsOpen() const noexcept -> bool { return Pimpl()->IsOpen(); }
 
 auto Decoder::Url() const noexcept -> const std::string & { return Pimpl()->Url(); }
+auto Decoder::Probe() const noexcept -> const std::string & { return Pimpl()->Probe(); }
 
 void Decoder::Close() noexcept { Pimpl()->Close(); }
 
@@ -628,6 +661,12 @@ auto Decoder::BestVideoStreamIndex() const noexcept -> int
 auto Decoder::VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
 {
   return Pimpl()->VideoStreamHeaders();
+}
+
+auto Decoder::VideoStreamHeader(const int stream_index) const
+  -> std::optional<InputVideoStreamHeader>
+{
+  return Pimpl()->VideoStreamHeader(stream_index);
 }
 
 auto Decoder::DecodeVideoFrame(const int stream_index,
