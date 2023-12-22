@@ -162,23 +162,28 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
     /*direction=*/Plug::Out,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
+  addChild(new StringPlug(// [10]
+    /*name=*/"probe",
+    /*direction=*/Plug::Out,
+    /*defaultValue=*/"",
+    /*flags=*/kPlugDefault & ~kPlugSerialisable));
 
-  addChild(new BoolPlug(// [10]
+  addChild(new BoolPlug(// [11]
     /*name=*/"__intermediateFileValid",
     /*direction=*/Plug::In,
     /*defaultValue=*/false,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new AtomicCompoundDataPlug(// [11]
+  addChild(new AtomicCompoundDataPlug(// [12]
     /*name=*/"__intermediateMetadata",
     /*direction=*/Plug::In,
     /*defaultValue=*/new IECore::CompoundData,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new StringPlug(// [12]
+  addChild(new StringPlug(// [13]
     /*name=*/"__intermediateColorSpace",
     /*direction=*/Plug::Out,
     /*defaultValue=*/"",
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
-  addChild(new ImagePlug(// [13]
+  addChild(new ImagePlug(// [14]
     /*name=*/"__intermediateImage",
     /*direction=*/Plug::In,
     /*flags=*/kPlugDefault & ~kPlugSerialisable));
@@ -187,9 +192,9 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   // defer to internal nodes to do the hard work.
 
   AvReaderPtr avReader = new AvReader(/*name=*/"__avReader");
-  addChild(avReader);// [14]
+  addChild(avReader);// [15]
   ColorSpacePtr colorSpace = new ColorSpace(/*name=*/"__colorSpace");
-  addChild(colorSpace);// [15]
+  addChild(colorSpace);// [16]
 
   // NOTE(tohi):
   // Add all children before using the member functions to get
@@ -209,6 +214,7 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   _intermediateImagePlug()->setInput(colorSpace->outPlug());
 
   availableFramesPlug()->setInput(avReader->availableFramesPlug());
+  probePlug()->setInput(avReader->probePlug());
 }
 
 // clang-format off
@@ -251,15 +257,16 @@ PLUG_MEMBER_IMPL(filterGraphPlug, Gaffer::StringPlug, 7U);
 
 PLUG_MEMBER_IMPL(availableFramesPlug, Gaffer::IntVectorDataPlug, 8U);
 PLUG_MEMBER_IMPL(fileValidPlug, Gaffer::BoolPlug, 9U);
+PLUG_MEMBER_IMPL(probePlug, Gaffer::StringPlug, 10U);
 
-PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 10U);
-PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 11U);
-PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 12U);
-PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 13U);
+PLUG_MEMBER_IMPL(_intermediateFileValidPlug, Gaffer::BoolPlug, 11U);
+PLUG_MEMBER_IMPL(_intermediateMetadataPlug, Gaffer::AtomicCompoundDataPlug, 12U);
+PLUG_MEMBER_IMPL(_intermediateColorSpacePlug, Gaffer::StringPlug, 13U);
+PLUG_MEMBER_IMPL(_intermediateImagePlug, GafferImage::ImagePlug, 14U);
 
 // Not really plugs, but follow the same pattern (they are also children).
-PLUG_MEMBER_IMPL(_avReader, AvReader, 14U);
-PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 15U);
+PLUG_MEMBER_IMPL(_avReader, AvReader, 15U);
+PLUG_MEMBER_IMPL(_colorSpace, GafferImage::ColorSpace, 16U);
 
 #undef PLUG_MEMBER_IMPL
 #undef PLUG_MEMBER_IMPL_SUB

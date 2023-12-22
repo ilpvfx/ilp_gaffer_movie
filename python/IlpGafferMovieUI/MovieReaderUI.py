@@ -218,6 +218,8 @@ Gaffer.Metadata.registerNode(
 			""",
 
 			"label", "Filter Graph",
+			"plugValueWidget:type", "GafferUI.MultiLineStringPlugValueWidget",
+
 		],
 
 		# section: Frames
@@ -235,6 +237,7 @@ Gaffer.Metadata.registerNode(
 		],
 
 		"fileValid" : [
+
 			"description",
 			"""
 			Whether or not the file exists and can be read into memory. Additionally, the 
@@ -242,9 +245,24 @@ Gaffer.Metadata.registerNode(
 			""",
 
 			"layout:section", "Frames",
+
+		],
+
+		"probe" : [
+			"description",
+			"""
+			Information about the video file, the output is similar to that from
+			ffprobe.
+			""",
+
+			"layout:section", "Frames",
+			"plugValueWidget:type", "GafferUI.MultiLineStringPlugValueWidget",
+			"label", "Probe",
+
 		]
 
 	}
+
 )
 
 # Augments PresetsPlugValueWidget label with the computed colour space

@@ -82,6 +82,7 @@ public:
 
   PLUG_MEMBER_DECL(availableFramesPlug, Gaffer::IntVectorDataPlug);
   PLUG_MEMBER_DECL(fileValidPlug, Gaffer::BoolPlug);
+  PLUG_MEMBER_DECL(probePlug, Gaffer::StringPlug);
 
   void affects(const Gaffer::Plug *input, AffectedPlugsContainer &outputs) const override;
 

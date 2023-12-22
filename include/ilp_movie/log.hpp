@@ -37,12 +37,20 @@ namespace LogLevel {
   constexpr int kTrace = 56;
 }// namespace LogLevel
 
-// Set the implementation (libav) log level.
+// Set the implementation log level.
 ILP_MOVIE_EXPORT
 void SetLogLevel(int level) noexcept;
 
+[[nodiscard]] ILP_MOVIE_EXPORT auto GetLogLevel() noexcept -> int;
+
+[[nodiscard]] ILP_MOVIE_EXPORT
+auto LogLevelString(int level) noexcept -> const char*;
+
 ILP_MOVIE_EXPORT
 void SetLogCallback(const std::function<void(int, const char *)> &cb) noexcept;
+
+[[nodiscard]] ILP_MOVIE_EXPORT
+auto GetLogCallback() noexcept -> std::function<void(int, const char *)> ;
 
 ILP_MOVIE_EXPORT
 void LogMsg(int level, const char *msg) noexcept;

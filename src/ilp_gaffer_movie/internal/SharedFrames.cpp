@@ -26,7 +26,6 @@ FrameLRUCache &cache()
         result.error = std::make_shared<std::string>("Bad decoder");
         return result;
       }
-      assert(decoderEntry.decoder->IsOpen());// NOLINT
 
       try {
         auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
@@ -68,11 +67,11 @@ bool operator==(const FrameCacheKey &lhs, const FrameCacheKey &rhs) noexcept
 std::size_t hash_value(const FrameCacheKey &k)
 {
   std::size_t seed = 0;
-  boost::hash_combine(seed, k.decoder_key.fileName);
-  boost::hash_combine(seed, k.decoder_key.filterGraphDescr.filter_descr);
-  boost::hash_combine(seed, k.decoder_key.filterGraphDescr.out_pix_fmt_name);
-  boost::hash_combine(seed, k.video_stream_index);
-  boost::hash_combine(seed, k.frame_nb);
+  boost::hash_combine(/*out*/ seed, k.decoder_key.fileName);
+  boost::hash_combine(/*out*/ seed, k.decoder_key.filterGraphDescr.filter_descr);
+  boost::hash_combine(/*out*/ seed, k.decoder_key.filterGraphDescr.out_pix_fmt_name);
+  boost::hash_combine(/*out*/ seed, k.video_stream_index);
+  boost::hash_combine(/*out*/ seed, k.frame_nb);
   return seed;
 }
 

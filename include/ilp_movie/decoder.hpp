@@ -43,6 +43,8 @@ struct InputVideoStreamHeader
   const char *color_range_name;
   const char *color_space_name;
   const char *color_primaries_name;
+
+  std::string description;
 };
 
 struct DecodedVideoFrame
@@ -107,6 +109,8 @@ public:
   // The URL (file name) that is currently open, empty if the decoder
   // is not in an open state.
   [[nodiscard]] auto Url() const noexcept -> const std::string &;
+
+  [[nodiscard]] auto Probe() const noexcept -> const std::string &;
 
   // Reset the state of the decoder, clearing all cached information putting the
   // decoder in a state as if no file has been opened.
