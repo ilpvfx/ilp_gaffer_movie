@@ -1,6 +1,12 @@
 ILP Gaffer Movie History
 ========================
 
+Version 0.2.0
+    IlpGafferMovie
+    - MovieReader node handles "automatic" color space. Currently just assumes that video 
+      frames are in sRGB.
+    - MovieReader node shows probe information (in "Frames" tab).
+
 Version 0.1.0
     ilp_movie (backend)
     - Rudimentary muxing (encoding) capabilities. Currently supports H264 and ProRes encoders.
