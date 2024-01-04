@@ -13,50 +13,6 @@
 using namespace boost::python;
 
 namespace {
-struct DefaultColorSpaceFunction
-{
-  explicit DefaultColorSpaceFunction(object fn) : m_fn(fn) {}// NOLINT
-
-  std::string operator()(const std::string &fileName,
-    const std::string &fileFormat,
-    const std::string &dataType,
-    const IECore::CompoundData *metadata,
-    const OCIO_NAMESPACE::ConstConfigRcPtr &config)
-  {
-
-    IECorePython::ScopedGILLock gilock;
-    try {
-      return extract<std::string>(m_fn(fileName,
-        fileFormat,
-        dataType,
-        IECore::CompoundDataPtr(const_cast<IECore::CompoundData *>(metadata)),// NOLINT
-        config));
-    } catch (const error_already_set &) {
-      IECorePython::ExceptionAlgo::translatePythonException();
-    }
-  }
-
-private:
-  object m_fn;
-};
-
-template<typename T> void setDefaultColorSpaceFunction(object f)
-{
-  T::setDefaultColorSpaceFunction(DefaultColorSpaceFunction(f));// NOLINT
-}
-
-template<typename T> object getDefaultColorSpaceFunction()
-{
-  return make_function(T::getDefaultColorSpaceFunction(),
-    default_call_policies(),
-    boost::mpl::vector<std::string,
-      const std::string &,
-      const std::string &,
-      const std::string &,
-      const IECore::CompoundData *,
-      const OCIO_NAMESPACE::ConstConfigRcPtr &>());
-}
-
 template<typename T> boost::python::list supportedExtensions()
 {
   std::vector<std::string> e;
@@ -112,10 +68,6 @@ BOOST_PYTHON_MODULE(_IlpGafferMovie)// NOLINT
     scope s = GafferBindings::DependencyNodeClass<IlpGafferMovie::MovieReader>()
       .def("supportedExtensions", &supportedExtensions<IlpGafferMovie::MovieReader>)
       .staticmethod("supportedExtensions")
-      .def("setDefaultColorSpaceFunction", &setDefaultColorSpaceFunction<IlpGafferMovie::MovieReader>)
-      .staticmethod("setDefaultColorSpaceFunction")
-      .def("getDefaultColorSpaceFunction", &getDefaultColorSpaceFunction<IlpGafferMovie::MovieReader>)
-      .staticmethod("getDefaultColorSpaceFunction")
     ;
 
 		enum_<IlpGafferMovie::MovieReader::MissingFrameMode>("MissingFrameMode")

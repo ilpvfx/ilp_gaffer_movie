@@ -243,13 +243,12 @@ struct MuxImpl
   AVCodecContext *enc_ctx,
   AVPacket *enc_pkt,
   AVFrame * /*enc_frame*/,
-  filter_graph_internal::FilterGraph* filter_graph,
+  filter_graph_internal::FilterGraph *filter_graph,
   AVFrame *dec_frame) noexcept -> bool
 {
   bool ok = true;
-  bool b = filter_graph->FilterFrames(dec_frame, [&](AVFrame* frame) {
-    return EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame);
-  });
+  bool b = filter_graph->FilterFrames(
+    dec_frame, [&](AVFrame *frame) { return EncodeWriteFrame(ofmt_ctx, enc_ctx, enc_pkt, frame); });
   return b && ok;
 
   // bool w = true;
@@ -562,9 +561,7 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
   fg_descr.in.time_base = impl->ofmt_ctx->streams[0]->time_base;// NOLINT
   fg_descr.out.pix_fmt = impl->enc_ctx->pix_fmt;
   impl->filter_graph = std::make_unique<filter_graph_internal::FilterGraph>();
-  if (!impl->filter_graph->SetDescription(fg_descr)) { 
-    return nullptr;
-  }
+  if (!impl->filter_graph->SetDescription(fg_descr)) { return nullptr; }
 
   auto mux_ctx = std::make_unique<MuxContext>();
   mux_ctx->params = params;
@@ -572,6 +569,8 @@ auto MakeMuxContext(const MuxParameters &params) noexcept -> std::unique_ptr<Mux
   return mux_ctx;
 }
 
+
+// DEPRECATED!!
 auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcept -> bool
 {
   // clang-format off
@@ -614,6 +613,53 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const MuxFrame &mux_frame) noexcep
     mux_ctx.impl->filter_graph.get(),
     dec_frame);
 }
+
+auto MuxWriteFrame(const MuxContext &mux_ctx, const FrameView &frame) noexcept -> bool
+{
+  const int w = frame.hdr.width;
+  const int h = frame.hdr.height;
+  const auto r = CompPixelData<const float>(frame.data, Comp::kR, w, h, frame.hdr.pix_fmt_name);
+  const auto g = CompPixelData<const float>(frame.data, Comp::kG, w, h, frame.hdr.pix_fmt_name);
+  const auto b = CompPixelData<const float>(frame.data, Comp::kB, w, h, frame.hdr.pix_fmt_name);
+
+  // clang-format off
+  // TODO(tohi): Any way to check if frame_nb is bad? Must be positive?
+  if (frame.hdr.width != mux_ctx.impl->enc_ctx->width || 
+      frame.hdr.height != mux_ctx.impl->enc_ctx->height || 
+      Empty(r) || Empty(g) || Empty(b)) {
+    LogMsg(LogLevel::kError, "Bad frame data input\n");
+    return false;
+  }
+  // clang-format on
+
+  // Pretend that a decoder sent us a frame.
+  // Create a frame and fill in the pixel data from the given mux frame.
+  AVFrame *dec_frame = av_frame_alloc();
+  if (dec_frame == nullptr) {
+    LogMsg(LogLevel::kError, "Cannot allocate decode frame\n");
+    return false;
+  }
+  dec_frame->format = AV_PIX_FMT_GBRPF32;
+  dec_frame->width = w;
+  dec_frame->height = h;
+  if (const int ret = av_frame_get_buffer(dec_frame, /*align=*/0); ret < 0) {
+    log_utils_internal::LogAvError("Cannot allocate decode frame buffer", ret);
+    return false;
+  }
+  dec_frame->pts = static_cast<int64_t>(frame.hdr.frame_nb);
+
+  std::memcpy(dec_frame->data[0], g.data, g.count * sizeof(float));
+  std::memcpy(dec_frame->data[1], b.data, b.count * sizeof(float));
+  std::memcpy(dec_frame->data[2], r.data, r.count * sizeof(float));
+
+  return FilterEncodeWriteFrame(mux_ctx.impl->ofmt_ctx,
+    mux_ctx.impl->enc_ctx,
+    mux_ctx.impl->enc_pkt,
+    mux_ctx.impl->enc_frame,
+    mux_ctx.impl->filter_graph.get(),
+    dec_frame);
+}
+
 
 auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
 {

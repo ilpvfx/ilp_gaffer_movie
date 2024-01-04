@@ -9,24 +9,14 @@
 #include <GafferImage/ImageAlgo.h>
 #include <GafferImage/ImagePlug.h>
 
-// #include <GafferImage/ImagePlug.h>
-
-#include <ilp_movie/log.hpp>
-#include <ilp_movie/mux.hpp>
+#include "ilp_movie/log.hpp"
+#include "ilp_movie/mux.hpp"
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::MovieWriter);
 
 using namespace Gaffer;
 using namespace GafferDispatch;
 using namespace GafferImage;
-
-namespace {
-struct ProfilePixelFormat
-{
-  const char *profile = nullptr;
-  const char *pix_fmt = nullptr;
-};
-}// namespace
 
 namespace IlpGafferMovie {
 

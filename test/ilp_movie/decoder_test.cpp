@@ -9,10 +9,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <ilp_movie/decoder.hpp>
-#include <ilp_movie/log.hpp>
-#include <ilp_movie/mux.hpp>
-#include <ilp_movie/pixel_data.hpp>
+#include "ilp_movie/decoder.hpp"
+#include "ilp_movie/frame.hpp"
+#include "ilp_movie/log.hpp"
+#include "ilp_movie/mux.hpp"
 
 using namespace std::literals;// "hello"sv
 
@@ -22,107 +22,97 @@ namespace {
 //             frame buffer.
 struct FramePair
 {
-  ilp_movie::MuxFrame mux_frame = {};
-  ilp_movie::DecodedVideoFrame dec_frame = {};
+  ilp_movie::FrameView mux_frame = {};
+  ilp_movie::Frame demux_frame = {};
 };
 
 [[nodiscard]] auto MakeFramePair(const int w,
   const int h,
   const int frame_nb,
-  const ilp_movie::PixelFormat pix_fmt,
+  const char *pix_fmt_name,
   FramePair *const fp) -> bool
 {
   if (!(w > 0 && h > 0)) { return false; }
 
-  fp->dec_frame.width = w;
-  fp->dec_frame.height = h;
-  fp->dec_frame.frame_nb = frame_nb;
-  fp->dec_frame.pixel_aspect_ratio = { /*.num=*/1, /*.den=*/1 };
-  fp->dec_frame.pix_fmt = pix_fmt;
-  fp->dec_frame.buf.count = ilp_movie::ChannelCount(pix_fmt)
-                            * static_cast<std::size_t>(fp->dec_frame.width)
-                            * static_cast<std::size_t>(fp->dec_frame.height);
-  fp->dec_frame.buf.data = std::make_unique<float[]>(fp->dec_frame.buf.count);// NOLINT
+  fp->demux_frame.hdr.width = w;
+  fp->demux_frame.hdr.height = h;
+  fp->demux_frame.hdr.pixel_aspect_ratio = { /*.num=*/1, /*.den=*/1 };
+  fp->demux_frame.hdr.frame_nb = frame_nb;
+  fp->demux_frame.hdr.pix_fmt_name = pix_fmt_name;
+  fp->demux_frame.buf = std::make_unique<uint8_t[]>(// NOLINT
+    ilp_movie::GetBufferSize(
+      fp->demux_frame.hdr.pix_fmt_name, fp->demux_frame.hdr.width, fp->demux_frame.hdr.height)
+      .value());
+  if (!ilp_movie::FillArrays(/*out*/ fp->demux_frame.data,
+        /*out*/ fp->demux_frame.linesize,
+        fp->demux_frame.buf.get(),
+        fp->demux_frame.hdr.pix_fmt_name,
+        fp->demux_frame.hdr.width,
+        fp->demux_frame.hdr.height)) {
+    return false;
+  }
 
-  const auto r = ilp_movie::ChannelData(&(fp->dec_frame), ilp_movie::Channel::kRed);
-  const auto g = ilp_movie::ChannelData(&(fp->dec_frame), ilp_movie::Channel::kGreen);
-  const auto b = ilp_movie::ChannelData(&(fp->dec_frame), ilp_movie::Channel::kBlue);
-  const auto a = ilp_movie::ChannelData(&(fp->dec_frame), ilp_movie::Channel::kAlpha);
+  using ilp_movie::CompPixelData;
+  namespace Comp = ilp_movie::Comp;
+  const auto r = CompPixelData<float>(fp->demux_frame.data, Comp::kR, w, h, pix_fmt_name);
+  const auto g = CompPixelData<float>(fp->demux_frame.data, Comp::kG, w, h, pix_fmt_name);
+  const auto b = CompPixelData<float>(fp->demux_frame.data, Comp::kB, w, h, pix_fmt_name);
+  const auto a = CompPixelData<float>(fp->demux_frame.data, Comp::kA, w, h, pix_fmt_name);
 
   // TMP!!
-  const float cx = 0.5F * static_cast<float>(fp->dec_frame.width) + static_cast<float>(frame_nb);
-  const float cy = 0.5F * static_cast<float>(fp->dec_frame.height);
-  const float rad =
-    0.25F * static_cast<float>(std::min(fp->dec_frame.width, fp->dec_frame.height));// in pixels
+  const float cx = 0.5F * static_cast<float>(fp->demux_frame.hdr.width)
+                   + static_cast<float>(fp->demux_frame.hdr.frame_nb);
+  const float cy = 0.5F * static_cast<float>(fp->demux_frame.hdr.height);
+  const float rad = 0.25F
+                    * static_cast<float>(
+                      std::min(fp->demux_frame.hdr.width, fp->demux_frame.hdr.height));// in pixels
   const float norm =
     1.0F
     / (0.5F
-       * static_cast<float>(std::sqrt(
-         fp->dec_frame.width * fp->dec_frame.width + fp->dec_frame.height * fp->dec_frame.height)));
+       * static_cast<float>(std::sqrt(fp->demux_frame.hdr.width * fp->demux_frame.hdr.width
+                                      + fp->demux_frame.hdr.height * fp->demux_frame.hdr.height)));
 
-  for (int y = 0; y < fp->dec_frame.height; ++y) {
-    for (int x = 0; x < fp->dec_frame.width; ++x) {
-      const auto i =
-        static_cast<size_t>(y) * static_cast<size_t>(fp->dec_frame.width) + static_cast<size_t>(x);
+  for (int y = 0; y < fp->demux_frame.hdr.height; ++y) {
+    for (int x = 0; x < fp->demux_frame.hdr.width; ++x) {
+      const auto i = static_cast<size_t>(y) * static_cast<size_t>(fp->demux_frame.hdr.width)
+                     + static_cast<size_t>(x);
       const float dx = static_cast<float>(x) - cx;
       const float dy = static_cast<float>(y) - cy;
       const float d = std::sqrt(dx * dx + dy * dy) - rad;
 
-      switch (fp->dec_frame.pix_fmt) {
-      case ilp_movie::PixelFormat::kGray:
-        r.data[i] = std::abs(d) * norm;// NOLINT
-        break;
-      case ilp_movie::PixelFormat::kRGB:
+      // TODO(tohi): Support grayscale?!
+      size_t p = 0U;
+      if (!Empty(b) && !Empty(r)) {
         if (d < 0) {
-          b.data[i] = std::abs(d) * norm;// NOLINT
+          b.data[i] = std::clamp(std::abs(d) * norm, 0.F, 1.F);// NOLINT
         } else {
-          r.data[i] = d * norm;// NOLINT
+          r.data[i] = std::clamp(d * norm, 0.F, 1.F);// NOLINT
         }
-        g.data[i] = std::clamp(static_cast<float>(frame_nb) / 400, 0.F, 1.F);// NOLINT
-        break;
-      case ilp_movie::PixelFormat::kRGBA:
-        if (d < 0) {
-          r.data[i] = std::abs(d) * norm;// NOLINT
-        } else {
-          g.data[i] = d * norm;// NOLINT
-        }
-        b.data[i] = std::clamp(static_cast<float>(frame_nb) / 400, 0.F, 1.F);// NOLINT
-        a.data[i] = (d < 0) ? 1.F : 0.F;// NOLINT
-        break;
-      case ilp_movie::PixelFormat::kNone:
-      default:
-        return false;
+        ++p;
       }
+      if (!Empty(g)) {
+        g.data[i] =// NOLINT
+          std::clamp(static_cast<float>(fp->demux_frame.hdr.frame_nb) / 400, 0.F, 1.F);
+        ++p;
+      }
+      if (!Empty(a)) {
+        a.data[i] = (d < 0) ? 1.F : 0.F;// NOLINT
+        ++p;
+      }
+      if (p == 0U) { return false; }
     }
   }
 
-  fp->mux_frame.width = fp->dec_frame.width;
-  fp->mux_frame.height = fp->dec_frame.height;
-  fp->mux_frame.frame_nb = static_cast<float>(fp->dec_frame.frame_nb);
-  fp->mux_frame.r = ilp_movie::ChannelData(fp->dec_frame.width,
-    fp->dec_frame.height,
-    ilp_movie::Channel::kRed,
-    fp->dec_frame.buf.data.get(),
-    fp->dec_frame.buf.count)
-                      .data;
-  fp->mux_frame.g = ilp_movie::ChannelData(fp->dec_frame.width,
-    fp->dec_frame.height,
-    ilp_movie::Channel::kGreen,
-    fp->dec_frame.buf.data.get(),
-    fp->dec_frame.buf.count)
-                      .data;
-  fp->mux_frame.b = ilp_movie::ChannelData(fp->dec_frame.width,
-    fp->dec_frame.height,
-    ilp_movie::Channel::kBlue,
-    fp->dec_frame.buf.data.get(),
-    fp->dec_frame.buf.count)
-                      .data;
-  fp->mux_frame.a = ilp_movie::ChannelData(fp->dec_frame.width,
-    fp->dec_frame.height,
-    ilp_movie::Channel::kAlpha,
-    fp->dec_frame.buf.data.get(),
-    fp->dec_frame.buf.count)
-                      .data;
+  fp->mux_frame.hdr = fp->demux_frame.hdr;
+  fp->mux_frame.buf = fp->demux_frame.buf.get();
+  if (!ilp_movie::FillArrays(/*out*/ fp->mux_frame.data,
+        /*out*/ fp->mux_frame.linesize,
+        fp->mux_frame.buf,
+        fp->mux_frame.hdr.pix_fmt_name,
+        fp->mux_frame.hdr.width,
+        fp->mux_frame.hdr.height)) {
+    return false;// NOLINT
+  }
 
   return true;
 }
@@ -134,7 +124,7 @@ auto WriteFrames(const ilp_movie::MuxContext &mux_ctx, const int frame_count) ->
   for (int i = 0; i < frame_count; ++i) {
     FramePair fp{};
     if (!MakeFramePair(
-          mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixelFormat::kRGB, &fp)) {
+          mux_ctx.params.width, mux_ctx.params.height, i, ilp_movie::PixFmt::kRGB_P_F32, &fp)) {
       return false;
     }
     if (!ilp_movie::MuxWriteFrame(mux_ctx, fp.mux_frame)) { return false; }
@@ -174,53 +164,80 @@ auto SeekFrames(ilp_movie::Decoder &decoder, const int frame_count) -> std::vect
   for (const auto frame_nb : frame_range) {
     FrameStats fs{};
 
-    ilp_movie::DecodedVideoFrame seek_frame = {};
+    ilp_movie::Frame seek_frame = {};
     if (!decoder.DecodeVideoFrame(/*stream_index=*/0, frame_nb, /*out*/ seek_frame)) { return {}; }
-    if (!(seek_frame.frame_nb == frame_nb)) { return {}; }
-    fs.key_frame = seek_frame.key_frame;
+    if (!(seek_frame.hdr.frame_nb == frame_nb)) { return {}; }
+    fs.key_frame = seek_frame.hdr.key_frame;
 
     FramePair fp = {};
-    if (!MakeFramePair(
-          seek_frame.width, seek_frame.height, frame_nb, ilp_movie::PixelFormat::kRGB, &fp)) {
+    if (!MakeFramePair(seek_frame.hdr.width,
+          seek_frame.hdr.height,
+          frame_nb,
+          seek_frame.hdr.pix_fmt_name,
+          &fp)) {
       return {};
     }
 
-    const auto r = ilp_movie::ChannelData(seek_frame.width,
-      seek_frame.height,
-      ilp_movie::Channel::kRed,
-      seek_frame.buf.data.get(),
-      seek_frame.buf.count);
-    const auto g = ilp_movie::ChannelData(seek_frame.width,
-      seek_frame.height,
-      ilp_movie::Channel::kGreen,
-      seek_frame.buf.data.get(),
-      seek_frame.buf.count);
-    const auto b = ilp_movie::ChannelData(seek_frame.width,
-      seek_frame.height,
-      ilp_movie::Channel::kBlue,
-      seek_frame.buf.data.get(),
-      seek_frame.buf.count);
+    using ilp_movie::CompPixelData;
+    namespace Comp = ilp_movie::Comp;
 
-    for (std::size_t i = 0; i < r.count; ++i) {
-      const auto err = static_cast<double>(std::abs(r.data[i] - fp.mux_frame.r[i]));// NOLINT
+    // The data we read...
+    const auto r_seek = CompPixelData<const float>(seek_frame.data,
+      Comp::kR,
+      seek_frame.hdr.width,
+      seek_frame.hdr.height,
+      seek_frame.hdr.pix_fmt_name);
+    const auto g_seek = CompPixelData<const float>(seek_frame.data,
+      Comp::kG,
+      seek_frame.hdr.width,
+      seek_frame.hdr.height,
+      seek_frame.hdr.pix_fmt_name);
+    const auto b_seek = CompPixelData<const float>(seek_frame.data,
+      Comp::kB,
+      seek_frame.hdr.width,
+      seek_frame.hdr.height,
+      seek_frame.hdr.pix_fmt_name);
+
+    // The data we wrote...
+    const auto r_mux = CompPixelData<const float>(fp.mux_frame.data,
+      Comp::kR,
+      fp.mux_frame.hdr.width,
+      fp.mux_frame.hdr.height,
+      fp.mux_frame.hdr.pix_fmt_name);
+    const auto g_mux = CompPixelData<const float>(fp.mux_frame.data,
+      Comp::kG,
+      fp.mux_frame.hdr.width,
+      fp.mux_frame.hdr.height,
+      fp.mux_frame.hdr.pix_fmt_name);
+    const auto b_mux = CompPixelData<const float>(fp.mux_frame.data,
+      Comp::kB,
+      fp.mux_frame.hdr.width,
+      fp.mux_frame.hdr.height,
+      fp.mux_frame.hdr.pix_fmt_name);
+
+    if (r_seek.count != r_mux.count) { return {}; }
+    for (std::size_t i = 0; i < r_seek.count; ++i) {
+      const auto err = static_cast<double>(std::abs(r_seek.data[i] - r_mux.data[i]));// NOLINT
       fs.r_avg_err += err;
       fs.r_max_err = std::max(err, fs.r_max_err);
     }
-    fs.r_avg_err /= static_cast<double>(r.count);
+    fs.r_avg_err /= static_cast<double>(r_seek.count);
 
-    for (std::size_t i = 0; i < g.count; ++i) {
-      const auto err = static_cast<double>(std::abs(g.data[i] - fp.mux_frame.g[i]));// NOLINT
+    if (b_seek.count != g_mux.count) { return {}; }
+    for (std::size_t i = 0; i < g_seek.count; ++i) {
+      const auto err = static_cast<double>(std::abs(g_seek.data[i] - g_mux.data[i]));// NOLINT
       fs.g_avg_err += err;
       fs.g_max_err = std::max(err, fs.g_max_err);
     }
-    fs.g_avg_err /= static_cast<double>(g.count);
+    fs.g_avg_err /= static_cast<double>(g_seek.count);
 
-    for (std::size_t i = 0; i < b.count; ++i) {
-      const auto err = static_cast<double>(std::abs(b.data[i] - fp.mux_frame.b[i]));// NOLINT
+    if (b_seek.count != b_mux.count) { return {}; }
+    for (std::size_t i = 0; i < b_seek.count; ++i) {
+      const auto err = static_cast<double>(std::abs(b_seek.data[i] - b_mux.data[i]));// NOLINT
       fs.b_avg_err += err;
       fs.b_max_err = std::max(err, fs.b_max_err);
     }
-    fs.b_avg_err /= static_cast<double>(b.count);
+    fs.b_avg_err /= static_cast<double>(b_seek.count);
 
     {// Debug.
       std::ostringstream oss;
@@ -311,7 +328,6 @@ TEST_CASE("seek(prores)")
       auto &&vsh = decoder.VideoStreamHeaders();
       REQUIRE(dump_log_on_fail(vsh.size() == 1U));
       REQUIRE(dump_log_on_fail(vsh[0].stream_index == 0));
-      REQUIRE(dump_log_on_fail(vsh[0].is_best == true));
       REQUIRE(dump_log_on_fail(vsh[0].width == kWidth));
       REQUIRE(dump_log_on_fail(vsh[0].height == kHeight));
       REQUIRE(dump_log_on_fail(vsh[0].first_frame_nb == 1));
@@ -341,9 +357,9 @@ TEST_CASE("seek(prores)")
         if (!(0.0 <= fs.r_avg_err && fs.r_avg_err < 0.01 &&
               0.0 <= fs.g_avg_err && fs.g_avg_err < 0.01 &&
               0.0 <= fs.b_avg_err && fs.b_avg_err < 0.01 &&
-              0.0 <= fs.r_max_err && fs.r_max_err < 0.15 &&
-              0.0 <= fs.g_max_err && fs.g_max_err < 0.15 &&
-              0.0 <= fs.b_max_err && fs.b_max_err < 0.15)) {
+              0.0 <= fs.r_max_err && fs.r_max_err < 0.03 &&
+              0.0 <= fs.g_max_err && fs.g_max_err < 0.03 &&
+              0.0 <= fs.b_max_err && fs.b_max_err < 0.03)) {
           bad_frame = i;
           break;
         }
@@ -407,7 +423,6 @@ TEST_CASE("seek(h.264)")
     auto &&vsh = decoder.VideoStreamHeaders();
     REQUIRE(dump_log_on_fail(vsh.size() == 1U));
     REQUIRE(dump_log_on_fail(vsh[0].stream_index == 0));
-    REQUIRE(dump_log_on_fail(vsh[0].is_best == true));
     REQUIRE(dump_log_on_fail(vsh[0].width == kWidth));
     REQUIRE(dump_log_on_fail(vsh[0].height == kHeight));
     REQUIRE(dump_log_on_fail(vsh[0].first_frame_nb == 1));
@@ -424,9 +439,9 @@ TEST_CASE("seek(h.264)")
       if (!(0.0 <= fs.r_avg_err && fs.r_avg_err < 0.01 &&
             0.0 <= fs.g_avg_err && fs.g_avg_err < 0.01 &&
             0.0 <= fs.b_avg_err && fs.b_avg_err < 0.01 &&
-            0.0 <= fs.r_max_err && fs.r_max_err < 0.15 &&
-            0.0 <= fs.g_max_err && fs.g_max_err < 0.15 &&
-            0.0 <= fs.b_max_err && fs.b_max_err < 0.15)) {
+            0.0 <= fs.r_max_err && fs.r_max_err < 0.03 &&
+            0.0 <= fs.g_max_err && fs.g_max_err < 0.03 &&
+            0.0 <= fs.b_max_err && fs.b_max_err < 0.03)) {
         bad_frame = i;
         break;
       }
@@ -452,7 +467,7 @@ TEST_CASE("seek(h.264)")
 
     REQUIRE(dump_log_on_fail(d0.BestVideoStreamIndex() == 0));
     REQUIRE(dump_log_on_fail(d1.BestVideoStreamIndex() == 0));
-    const int stream_index = 0;
+    constexpr int stream_index = 0;
 
     //     REQUIRE(dump_log_on_fail(d0.SetFilterGraph(stream_index,
     // #if 0
@@ -471,23 +486,23 @@ TEST_CASE("seek(h.264)")
     int fail0 = -1;
     int fail1 = -1;
     std::thread t0{ [&d0, &fail0]() {
-      ilp_movie::DecodedVideoFrame dvf{};
+      ilp_movie::Frame dec_frame{};
       for (int f = 1; f <= kFrameCount; ++f) {
-        if (!d0.DecodeVideoFrame(stream_index, f, /*out*/ dvf)) {
+        if (!d0.DecodeVideoFrame(stream_index, f, /*out*/ dec_frame)) {
           fail0 = f;
           break;
         }
       }
     } };
     std::thread t1{ [&d1, &fail1]() {
-      ilp_movie::DecodedVideoFrame dvf{};
+      ilp_movie::Frame dec_frame{};
       for (int f = 1; f <= kFrameCount; ++f) {
-        if (!d1.DecodeVideoFrame(stream_index, f, /*out*/ dvf)) {
+        if (!d1.DecodeVideoFrame(stream_index, f, /*out*/ dec_frame)) {
           fail1 = f;
           break;
         }
 
-        if (!(dvf.width == kWidth / 2 && dvf.height == kHeight / 2)) {
+        if (!(dec_frame.hdr.width == kWidth / 2 && dec_frame.hdr.height == kHeight / 2)) {
           fail1 = f;
           break;
         }
