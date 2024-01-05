@@ -1,4 +1,4 @@
-#include <ilp_gaffer_movie/av_reader.hpp>
+#include "ilp_gaffer_movie/av_reader.hpp"
 
 // The nested TaskMutex needs to be the first to include tbb
 #include "internal/LRUCache.h"
@@ -10,6 +10,7 @@
 #include <mutex>// std::call_once
 #include <numeric>// std::iota
 #include <string>// std::string
+#include <string_view>// std::string_view
 
 // HACK(tohi): Disable TBB deprecation warning.
 #define __TBB_show_deprecation_message_task_scheduler_init_H
@@ -23,9 +24,11 @@
 
 #include <boost/bind/bind.hpp>
 
-#include <ilp_movie/decoder.hpp>
-#include <ilp_movie/log.hpp>
-#include <ilp_movie/pixel_data.hpp>
+#include "ilp_movie/decoder.hpp"
+#include "ilp_movie/frame.hpp"
+#include "ilp_movie/log.hpp"
+
+using namespace std::literals;
 
 GAFFER_NODE_DEFINE_TYPE(IlpGafferMovie::AvReader);
 
@@ -265,21 +268,21 @@ GafferImage::Format AvReader::computeFormat(const Gaffer::Context *context,
   // We cannot rely on the video stream headers here, since the pixel dimensions of
   // the video frames could be modified by the filter graph.
 
-  const auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(
-    _retrieveFrame(context, /*holdForBlack=*/true));
+  const auto frame =
+    std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context, /*holdForBlack=*/true));
   if (frame == nullptr) { return GafferImage::FormatPlug::getDefaultFormat(context); }
 
   double pixelAspect = 1.0;
-  if (frame->pixel_aspect_ratio.num > 0 && frame->pixel_aspect_ratio.den > 0) {
+  if (frame->hdr.pixel_aspect_ratio.num > 0 && frame->hdr.pixel_aspect_ratio.den > 0) {
     pixelAspect =
-      static_cast<double>(frame->pixel_aspect_ratio.num) / frame->pixel_aspect_ratio.den;
+      static_cast<double>(frame->hdr.pixel_aspect_ratio.num) / frame->hdr.pixel_aspect_ratio.den;
   }
 
   // clang-format off
   return GafferImage::Format{ 
     Imath::Box2i{ 
       /*minT=*/Imath::V2i{ 0, 0 },
-      /*maxT=*/Imath::V2i{ frame->width, frame->height } },
+      /*maxT=*/Imath::V2i{ frame->hdr.width, frame->hdr.height } },
     pixelAspect };
   // clang-format on
 }
@@ -307,14 +310,13 @@ Imath::Box2i AvReader::computeDataWindow(const Gaffer::Context *context,
   // We cannot rely on the video stream headers here, since the pixel dimensions of
   // the video frames could be modified by the filter graph.
 
-  const auto frame =
-    std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
+  const auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->dataWindowPlug()->defaultValue(); }
 
   // clang-format off
   return Imath::Box2i{ 
       /*minT=*/Imath::V2i{ 0, 0 },
-      /*maxT=*/Imath::V2i{ frame->width, frame->height } };
+      /*maxT=*/Imath::V2i{ frame->hdr.width, frame->hdr.height } };
   // clang-format on
 }
 
@@ -336,18 +338,24 @@ void AvReader::hashMetadata(const GafferImage::ImagePlug *parent,
 IECore::ConstCompoundDataPtr AvReader::computeMetadata(const Gaffer::Context *context,
   const GafferImage::ImagePlug *parent) const
 {
-  const auto frame =
-    std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
+  const auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->metadataPlug()->defaultValue(); }
 
-  // TODO(tohi):
-  // Not sure what type of metadata we want/need for video frames...
+  // In theory we could use metadata, like written below, to perform
+  // "optimal" color conversion using OCIO. In practice, however, we
+  // fallback on heuristics, but if we were to try a more sophisticated
+  // approach it is likely we would need metadata regarding the "FFmpeg colorspace"
+  // of the frame.
 
+  // clang-format off
   IECore::CompoundDataPtr result = new IECore::CompoundData;
-  // const auto dataType = std::string{ "uint32" };
-  // const auto fileFormat = std::string{ std::string{ "mov" };
-  // result->writable()["dataType"] = new IECore::StringData(dataType);// NOLINT
-  // result->writable()["fileFormat"] = new IECore::StringData(fileFormat);// NOLINT
+  result->writable()["pixelFormat"] = new IECore::StringData(frame->hdr.pix_fmt_name);// NOLINT
+  result->writable()["colorRange"] = new IECore::StringData(frame->hdr.color_range_name);// NOLINT
+  result->writable()["colorSpace"] = new IECore::StringData(frame->hdr.color_space_name);// NOLINT
+  result->writable()["colorTrc"] = new IECore::StringData(frame->hdr.color_trc_name);// NOLINT
+  result->writable()["colorPrimaries"] = new IECore::StringData(frame->hdr.color_primaries_name);// NOLINT
+  // clang-format on
+
   return result;
 }
 
@@ -390,8 +398,8 @@ IECore::ConstIntVectorDataPtr AvReader::computeSampleOffsets(const Imath::V2i & 
   const Gaffer::Context * /*context*/,
   const GafferImage::ImagePlug * /*parent*/) const
 {
-  // We don't have to worry about "deep" images or tile batches since we are not dealing with EXR
-  // images.
+  // We don't have to worry about "deep" images or tile batches since we are not dealing
+  // with EXR images.
   return GafferImage::ImagePlug::flatTileSampleOffsets();
 }
 
@@ -412,34 +420,35 @@ void AvReader::hashChannelNames(const GafferImage::ImagePlug *parent,
 IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Context *context,
   const GafferImage::ImagePlug *parent) const
 {
-  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
+  auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelNamesPlug()->defaultValue(); }
 
-  // clang-format off
-  IECore::StringVectorDataPtr channelNamesData = nullptr;
-  switch (frame->pix_fmt) {
-  case ilp_movie::PixelFormat::kGray:
-  case ilp_movie::PixelFormat::kRGB:
-    channelNamesData = new IECore::StringVectorData({// NOLINT
-      GafferImage::ImageAlgo::channelNameR,
-      GafferImage::ImageAlgo::channelNameG,
-      GafferImage::ImageAlgo::channelNameB,
-    });
-    break;
-  case ilp_movie::PixelFormat::kRGBA:
-    channelNamesData = new IECore::StringVectorData({// NOLINT
-      GafferImage::ImageAlgo::channelNameR,
-      GafferImage::ImageAlgo::channelNameG,
-      GafferImage::ImageAlgo::channelNameB,
-      GafferImage::ImageAlgo::channelNameA,
-    });
-    break;
-  case ilp_movie::PixelFormat::kNone:
-  default:
-    throw IECore::Exception(boost::str(boost::format("Unspecified frame pixel format")));
+  // Check if we can access channel data for the frame to determine which
+  // channels to request later.
+
+  std::vector<std::string> channelNames;
+
+  using ilp_movie::CompPixelData;
+  namespace Comp = ilp_movie::Comp;
+  if (!Empty(CompPixelData<const float>(
+        frame->data, frame->linesize, Comp::kR, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+    channelNames.push_back(GafferImage::ImageAlgo::channelNameR);
   }
-  // clang-format on
-  return channelNamesData;
+  if (!Empty(CompPixelData<const float>(
+        frame->data, frame->linesize, Comp::kG, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+    channelNames.push_back(GafferImage::ImageAlgo::channelNameG);
+  }
+  if (!Empty(CompPixelData<const float>(
+        frame->data, frame->linesize, Comp::kB, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+    channelNames.push_back(GafferImage::ImageAlgo::channelNameB);
+  }
+  if (!Empty(CompPixelData<const float>(
+        frame->data, frame->linesize, Comp::kA, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+    channelNames.push_back(GafferImage::ImageAlgo::channelNameA);
+  }
+
+  return IECore::StringVectorDataPtr{ new IECore::StringVectorData{ // NOLINT
+    std::move(channelNames) } };
 }
 
 void AvReader::hashChannelData(const GafferImage::ImagePlug *parent,
@@ -474,9 +483,29 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   //   channelName
   //     % tileOrigin.x % tileOrigin.y);
 
-  GafferImage::ImagePlug::GlobalScope c(context);
-  auto frame = std::static_pointer_cast<ilp_movie::DecodedVideoFrame>(_retrieveFrame(context));
+  GafferImage::ImagePlug::GlobalScope globalScope(context);
+  auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelDataPlug()->defaultValue(); }
+
+  // Determine which component/channel we want to access.
+  namespace Comp = ilp_movie::Comp;
+  Comp::ValueType c = Comp::kUnknown;
+  if (channelName == GafferImage::ImageAlgo::channelNameR) {
+    c = ilp_movie::Comp::kR;
+  } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
+    c = ilp_movie::Comp::kG;
+  } else if (channelName == GafferImage::ImageAlgo::channelNameB) {
+    c = ilp_movie::Comp::kB;
+  } else if (channelName == GafferImage::ImageAlgo::channelNameA) {
+    c = ilp_movie::Comp::kA;
+  } else {
+    throw IECore::Exception("Unexpected channel name");
+  }
+
+  using ilp_movie::CompPixelData;
+  const auto pix = CompPixelData<const float>(
+    frame->data, frame->linesize, c, frame->hdr.height, frame->hdr.pix_fmt_name);
+  if (Empty(pix)) { throw IECore::Exception("Empty pixel data"); }
 
   const Imath::Box2i dataWindow = outPlug()->dataWindowPlug()->getValue();
   const Imath::Box2i tileBound(
@@ -494,53 +523,14 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
     std::vector<float>(static_cast<size_t>(GafferImage::ImagePlug::tilePixels())));
   auto &tile = tileData->writable();
 
-  using ilp_movie::Channel;
-  using ilp_movie::PixelData;
-  using ilp_movie::PixelFormat;
-  using ilp_movie::ChannelData;
-  const auto *f = frame.get();
-  PixelData<float> ch = {};
-  switch (frame->pix_fmt) {
-  case PixelFormat::kGray:
-    ch =
-      ilp_movie::ChannelData(f->width, f->height, Channel::kRed, f->buf.data.get(), f->buf.count);
-    break;
-  case PixelFormat::kRGB:
-    if (channelName == GafferImage::ImageAlgo::channelNameR) {
-      ch = ChannelData(f->width, f->height, Channel::kRed, f->buf.data.get(), f->buf.count);
-    } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-      ch = ChannelData(f->width, f->height, Channel::kGreen, f->buf.data.get(), f->buf.count);
-    } else if (channelName == GafferImage::ImageAlgo::channelNameB) {
-      ch = ChannelData(f->width, f->height, Channel::kBlue, f->buf.data.get(), f->buf.count);
-    } else {
-      throw IECore::Exception("Unexpected channel name");
-    }
-    break;
-  case PixelFormat::kRGBA:
-    if (channelName == GafferImage::ImageAlgo::channelNameR) {
-      ch = ChannelData(f->width, f->height, Channel::kRed, f->buf.data.get(), f->buf.count);
-    } else if (channelName == GafferImage::ImageAlgo::channelNameG) {
-      ch = ChannelData(f->width, f->height, Channel::kGreen, f->buf.data.get(), f->buf.count);
-    } else if (channelName == GafferImage::ImageAlgo::channelNameB) {
-      ch = ChannelData(f->width, f->height, Channel::kBlue, f->buf.data.get(), f->buf.count);
-    } else if (channelName == GafferImage::ImageAlgo::channelNameA) {
-      ch = ChannelData(f->width, f->height, Channel::kAlpha, f->buf.data.get(), f->buf.count);
-    } else {
-      throw IECore::Exception("Unexpected channel name");
-    }
-    break;
-  case PixelFormat::kNone:
-  default:
-    throw IECore::Exception("Unspecified frame pixel format");
-  }
-
   const Imath::Box2i tileRegion = GafferImage::BufferAlgo::intersection(tileBound, dataWindow);
 
   constexpr auto kTileSize = static_cast<size_t>(GafferImage::ImagePlug::tileSize());
   for (int y = tileRegion.min.y; y < tileRegion.max.y; ++y) {
     float *dst = &tile[static_cast<size_t>(y - tileRegion.min.y) * kTileSize];
-    const float *src = &(ch.data[static_cast<size_t>(y) * static_cast<size_t>(f->width)// NOLINT
-                                 + static_cast<size_t>(tileRegion.min.x)]);
+    const float *src =
+      &(pix.data[static_cast<size_t>(y) * static_cast<size_t>(frame->hdr.width)// NOLINT
+                 + static_cast<size_t>(tileRegion.min.x)]);
     std::memcpy(dst, src, sizeof(float) * static_cast<size_t>(tileRegion.max.x - tileRegion.min.x));
   }
 
@@ -579,13 +569,17 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context)
   if (fileName.empty()) { return nullptr; }
   std::string resolvedFileName = context->substitute(fileName);
 
+  // CHECK ALPHA!?!? stream header?!?
+
+  static const std::string kPixFmtName = "gbrpf32le";
+
   // clang-format off
   const auto decoderEntry = shared_decoders_internal::SharedDecoders::get(
     /*key=*/shared_decoders_internal::DecoderCacheKey{ 
       /*.fileName=*/std::move(resolvedFileName),
       /*.filterGraphDescr=*/{ 
         /*.filter_descr=*/_filterGraph(context),
-        /*.out_pix_fmt_name=*/"gbrpf32le" 
+        /*.out_pix_fmt_name=*/kPixFmtName
       } 
     });
   // clang-format on
@@ -595,7 +589,7 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context)
   }
 
   return decoderEntry.decoder;
-}
+}// namespace IlpGafferMovie
 
 std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context,
   const bool holdForBlack) const
@@ -680,13 +674,12 @@ std::shared_ptr<void> AvReader::_retrieveFrame(const Gaffer::Context *context,
 
 void AvReader::_plugSet(Gaffer::Plug *plug)
 {
-  // NOTE(tohi): 
+  // NOTE(tohi):
   // Potentially clears decoders and frames for ALL AvReader nodes...
 
   if (plug == refreshCountPlug()) {
     // This clears the cache every time the refresh count is updated, so we don't have
     // entries from old files hanging around.
-    TRACE("AvReader::_plugSet", "refreshCount");
     shared_frames_internal::SharedFrames::clear();
     shared_decoders_internal::SharedDecoders::clear();
   }
@@ -695,7 +688,6 @@ void AvReader::_plugSet(Gaffer::Plug *plug)
     // This clears the frame cache every time the filter graph is updated, since
     // this may cause frames to be rescaled, i.e. alter the pixel dimensions.
     // Opened decoders are still valid.
-    TRACE("AvReader::_plugSet", "filterGraph");
     shared_frames_internal::SharedFrames::clear();
   }
 }

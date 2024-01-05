@@ -88,17 +88,6 @@ public:
 
   static size_t supportedExtensions(std::vector<std::string> &extensions);
 
-  // A function which can take information about a file being read, and return the colorspace
-  // of the data within the file. This is used whenever the colorSpace plug is at its default
-  // value.
-  using DefaultColorSpaceFunction = std::function<const std::string(const std::string &fileName,
-    const std::string &fileFormat,
-    const std::string &dataType,
-    const IECore::CompoundData *metadata,
-    const OCIO_NAMESPACE::ConstConfigRcPtr &config)>;
-  static void setDefaultColorSpaceFunction(DefaultColorSpaceFunction f);
-  static DefaultColorSpaceFunction getDefaultColorSpaceFunction();
-
 protected:
   void hash(const Gaffer::ValuePlug *output,
     const Gaffer::Context *context,
@@ -170,8 +159,6 @@ private:
   // Not really plugs, but follow the same pattern.
   PLUG_MEMBER_DECL(_avReader, AvReader);
   PLUG_MEMBER_DECL(_colorSpace, GafferImage::ColorSpace);
-
-  static DefaultColorSpaceFunction &_defaultColorSpaceFunction();
 
   static size_t g_FirstPlugIndex;
 };

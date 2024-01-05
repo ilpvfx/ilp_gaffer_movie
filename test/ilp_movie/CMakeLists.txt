@@ -51,8 +51,6 @@ target_link_libraries(decoder_test
           Threads::Threads
           Catch2::Catch2WithMain)
 
-# Automatically discover tests that are defined in catch based test files you can modify the unittests. Set TEST_PREFIX
-# to whatever you want, or use different for different binaries.
 catch_discover_tests(
   decoder_test 
   TEST_PREFIX
@@ -65,4 +63,25 @@ catch_discover_tests(
   "decoder_test."
   OUTPUT_SUFFIX
   .xml)
+
+  add_executable(frame_test frame_test.cpp)
+  target_link_libraries(frame_test 
+    PRIVATE ilp_gaffer_movie::ilp_gaffer_movie_warnings
+            ilp_gaffer_movie::ilp_gaffer_movie_options
+            ilp_movie::ilp_movie
+            Threads::Threads
+            Catch2::Catch2WithMain)
   
+  catch_discover_tests(
+    decoder_test 
+    TEST_PREFIX
+    "frame_test."
+    REPORTER
+    XML
+    OUTPUT_DIR
+    .
+    OUTPUT_PREFIX
+    "frame_test."
+    OUTPUT_SUFFIX
+    .xml)
+    

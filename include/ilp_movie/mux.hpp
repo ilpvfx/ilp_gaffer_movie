@@ -45,8 +45,8 @@
 #include <optional>// std::optional
 #include <string_view>// std::string_view
 
-#include <ilp_movie/color.hpp>
-#include <ilp_movie/ilp_movie_export.hpp>// ILP_MOVIE_EXPORT
+#include "ilp_movie/frame.hpp"
+#include "ilp_movie/ilp_movie_export.hpp"// ILP_MOVIE_EXPORT
 
 namespace ilp_movie {
 
@@ -353,7 +353,7 @@ struct MuxContext
 // Here the color channels are separated into planes, i.e. the RGB values are not interleaved.
 // Instead each color channel has its own linear buffer.
 // The 'r' pointer is assumed to point to a buffer of (width * height) floats, and
-// similar for 'g' and 'b'.
+// similar for 'g' and 'b' (and possibly 'a').
 // NOTE: Set the width and height using the corresponding values on the mux context.
 struct MuxFrame
 {
@@ -392,6 +392,10 @@ struct MuxFrame
 // we currently don't support pixel scaling.
 [[nodiscard]] ILP_MOVIE_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx,
   const MuxFrame &frame) noexcept -> bool;
+
+[[nodiscard]] ILP_MOVIE_EXPORT auto MuxWriteFrame(const MuxContext &mux_ctx,
+  const FrameView &frame) noexcept -> bool;
+
 
 // Finalize the file by flushing streams and possibly performing other operations.
 //
