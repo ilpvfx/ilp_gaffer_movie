@@ -15,6 +15,28 @@ namespace PixFmt {
   constexpr const char *kRGBA_P_F32 = "gbrapf32le";
 }// namespace PixFmt
 
+namespace ColorRange {
+  // Limited range.
+  constexpr const char *kTv = "tv";
+
+  // Full range.
+  constexpr const char *kPc = "pc";
+
+  constexpr const char *kUnknown = "unknown";
+}// namespace ColorRange
+
+namespace Colorspace {
+  constexpr const char* kBt709 = "bt709";
+}// namespace Colorspace
+
+namespace ColorTrc {
+  constexpr const char *kIec61966_2_1 = "iec61966-2-1";
+}// namespace ColorTrc
+
+namespace ColorPrimaries {
+  constexpr const char *kBt709 = "bt709";
+}// namespace ColorPrimaries
+
 namespace Comp {
   using ValueType = int;
   constexpr ValueType kR = 0;
@@ -66,21 +88,23 @@ struct FrameView
 {
   FrameHeader hdr = {};
 
+  // Pointers to the picture/channel planes.
   std::array<uint8_t *, 4> data = {};
 
+  // [bytes]
   std::array<int, 4> linesize = {};
 
+  // Views don't own their buffers.
   const uint8_t *buf = nullptr;
 };
 
-// In [bytes].
+// Returns the size, in [bytes], of the buffer needed for the given pixel format and
+// pixel dimensions.
 [[nodiscard]] ILP_MOVIE_EXPORT auto GetBufferSize(const char *pix_fmt_name,
   int width,
   int height) noexcept -> std::optional<std::size_t>;
 
-[[nodiscard]] ILP_MOVIE_EXPORT auto CountPlanes(const char *pix_fmt_name) noexcept
-  -> std::optional<int>;
-
+// Can, and should, be used for both frames and views.
 [[nodiscard]] ILP_MOVIE_EXPORT auto FillArrays(std::array<uint8_t *, 4> &data,
   std::array<int, 4> &linesize,
   const uint8_t *buf,
@@ -103,7 +127,8 @@ template<typename PixelT>
   return p.data == nullptr || p.count == 0;
 }
 
-// Try to access pixel data for a component. Returns an empty PixelData if this is not possible.
+// Try to access (typed) pixel data for a component. Returns an empty PixelData if this is not
+// possible.
 //
 // Implemented for:
 // - <float>
@@ -112,9 +137,9 @@ template<typename PixelT>
 // NOTE: Other types will give linker errors.
 template<typename PixelT>
 [[nodiscard]] ILP_MOVIE_EXPORT auto CompPixelData(const std::array<uint8_t *, 4> &data,
+  const std::array<int, 4> &linesize,
   Comp::ValueType c,
-  int w,
-  int h,
+  int height,
   const char *pix_fmt_name) noexcept -> PixelData<PixelT>;
 
 }// namespace ilp_movie

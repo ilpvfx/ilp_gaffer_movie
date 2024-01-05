@@ -45,7 +45,6 @@
 #include <optional>// std::optional
 #include <string_view>// std::string_view
 
-#include "ilp_movie/color.hpp"
 #include "ilp_movie/frame.hpp"
 #include "ilp_movie/ilp_movie_export.hpp"// ILP_MOVIE_EXPORT
 

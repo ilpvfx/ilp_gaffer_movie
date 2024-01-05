@@ -337,7 +337,8 @@ void MovieReader::compute(Gaffer::ValuePlug *output, const Gaffer::Context *cont
       // }
       //
       // The idea here is that since we ask for RGB colors in 32-bit float format
-      // from the decoder, those pixels should be converted all the way to sRGB.
+      // from the decoder, those pixels should already be converted all the way 
+      // to sRGB.
 
       auto cfg = GafferImage::OpenColorIOAlgo::currentConfig();
       if (cfg != nullptr) {

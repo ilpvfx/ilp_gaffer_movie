@@ -423,24 +423,27 @@ IECore::ConstStringVectorDataPtr AvReader::computeChannelNames(const Gaffer::Con
   auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelNamesPlug()->defaultValue(); }
 
+  // Check if we can access channel data for the frame to determine which
+  // channels to request later.
+
   std::vector<std::string> channelNames;
 
   using ilp_movie::CompPixelData;
   namespace Comp = ilp_movie::Comp;
   if (!Empty(CompPixelData<const float>(
-        frame->data, Comp::kR, frame->hdr.width, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+        frame->data, frame->linesize, Comp::kR, frame->hdr.height, frame->hdr.pix_fmt_name))) {
     channelNames.push_back(GafferImage::ImageAlgo::channelNameR);
   }
   if (!Empty(CompPixelData<const float>(
-        frame->data, Comp::kG, frame->hdr.width, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+        frame->data, frame->linesize, Comp::kG, frame->hdr.height, frame->hdr.pix_fmt_name))) {
     channelNames.push_back(GafferImage::ImageAlgo::channelNameG);
   }
   if (!Empty(CompPixelData<const float>(
-        frame->data, Comp::kB, frame->hdr.width, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+        frame->data, frame->linesize, Comp::kB, frame->hdr.height, frame->hdr.pix_fmt_name))) {
     channelNames.push_back(GafferImage::ImageAlgo::channelNameB);
   }
   if (!Empty(CompPixelData<const float>(
-        frame->data, Comp::kA, frame->hdr.width, frame->hdr.height, frame->hdr.pix_fmt_name))) {
+        frame->data, frame->linesize, Comp::kA, frame->hdr.height, frame->hdr.pix_fmt_name))) {
     channelNames.push_back(GafferImage::ImageAlgo::channelNameA);
   }
 
@@ -484,6 +487,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
   auto frame = std::static_pointer_cast<ilp_movie::Frame>(_retrieveFrame(context));
   if (frame == nullptr) { return parent->channelDataPlug()->defaultValue(); }
 
+  // Determine which component/channel we want to access.
   namespace Comp = ilp_movie::Comp;
   Comp::ValueType c = Comp::kUnknown;
   if (channelName == GafferImage::ImageAlgo::channelNameR) {
@@ -500,7 +504,7 @@ IECore::ConstFloatVectorDataPtr AvReader::computeChannelData(const std::string &
 
   using ilp_movie::CompPixelData;
   const auto pix = CompPixelData<const float>(
-    frame->data, c, frame->hdr.width, frame->hdr.height, frame->hdr.pix_fmt_name);
+    frame->data, frame->linesize, c, frame->hdr.height, frame->hdr.pix_fmt_name);
   if (Empty(pix)) { throw IECore::Exception("Empty pixel data"); }
 
   const Imath::Box2i dataWindow = outPlug()->dataWindowPlug()->getValue();

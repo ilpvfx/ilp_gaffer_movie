@@ -618,9 +618,10 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const FrameView &frame) noexcept -
 {
   const int w = frame.hdr.width;
   const int h = frame.hdr.height;
-  const auto r = CompPixelData<const float>(frame.data, Comp::kR, w, h, frame.hdr.pix_fmt_name);
-  const auto g = CompPixelData<const float>(frame.data, Comp::kG, w, h, frame.hdr.pix_fmt_name);
-  const auto b = CompPixelData<const float>(frame.data, Comp::kB, w, h, frame.hdr.pix_fmt_name);
+  const char *pix_fmt_name = frame.hdr.pix_fmt_name;
+  const auto r = CompPixelData<const float>(frame.data, frame.linesize, Comp::kR, h, pix_fmt_name);
+  const auto g = CompPixelData<const float>(frame.data, frame.linesize, Comp::kG, h, pix_fmt_name);
+  const auto b = CompPixelData<const float>(frame.data, frame.linesize, Comp::kB, h, pix_fmt_name);
 
   // clang-format off
   // TODO(tohi): Any way to check if frame_nb is bad? Must be positive?
