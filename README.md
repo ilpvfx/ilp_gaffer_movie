@@ -1,4 +1,7 @@
 # Gaffer Movie Nodes
+> [!WARNING]
+> The code in this repository is a work in progress. Refer to the [issue](https://github.com/ilpvfx/ilp_gaffer_movie/issues) page for a list of known issues.
+
 At a high level, [Gaffer](https://github.com/GafferHQ/gaffer) can already read/write movies, since movies are essentially a sequence of images played back at a high enough frame rate to trick the human eye into interpreting the result as a continuous visual stream. To date, this is done by reading/writing image sequences in one of many popular formats (`.exr`, `.png`, or whatever [OpenImageIO](https://github.com/AcademySoftwareFoundation/OpenImageIO) supports). As such movie frames are assumed to exist on disk as separate image files, and compression is thus only possible at a per-frame level. Now, while an image sequence might be suitable for a final delivery to a client, it is not always ideal to work with since data is spread across many (large-ish) files. Additionally, most (if not all) media players require image sequences to be encoded into a single movie file using one of many efficient video encoders (e.g. `ProRes`, `H264`, etc). Video encoders drastically reduce the size of an image sequence by performing temporal compression and many other tricks. The resulting pixel data is then stored in a bitstream that can be efficiently read from disk, which enables playback at the intended frame rate. 
 
 Video encoders typically perform lossy compression, which is why they are not ideal for final deliveries where the video encoding would take place on the customer side after all else is said and done. For intermediary deliveries, however, movies files are excellent since they can be played out-of-the-box when reviewing. Although frames are rendered as separate images in a previous production step, there is typically some sort of "burn-in" process where additional information is added to each frame (i.e. "burnt" into the pixels). Ideally, the "burn-in" process could be combined with a video encoding step to create a movie file containing the rendered frames with the additional information added. Currently this is not possible with [Gaffer](https://github.com/GafferHQ/gaffer) since there is no way to export frames as a movie file. Similarily, it is not possible to import the frames of an existing movie file into [Gaffer](https://github.com/GafferHQ/gaffer), since it is not capable of decoding the pixel data.
@@ -45,7 +48,13 @@ As mentioned above, the [FFmpeg](https://ffmpeg.org/) command-line application i
 
 To encapsulate some of the complexities that come with using `libav`, a back-end module called `ilp_movie` was introduced. The main functionality of this module is take an image that resides in memory (as opposed to being stored in a file on disk) and pass that image to an encoder (and vice versa for decoding). This enables skipping the step of converting one image sequence into another on disk before encoding, and allows pixel data from movie files to be presented in [Gaffer](https://github.com/GafferHQ/gaffer). An advantage to this approach is that `ilp_movie` could potentially be re-used in other projects, since it has no dependecies on [Gaffer](https://github.com/GafferHQ/gaffer).
 
-Furthermore, `ilp_movie` uses `libav` as a _private_ dependency (as opposed to _public_/_transitive_). This means that users of `ilp_movie` are not even aware that `libav` is used in the implementation. While this requires some additional work, it means that `ilp_movie` can link statically against `libav` and that `ilp_movie` can be distributed without providing any `libav` header files. The main challenge, however, is to make sure that `ilp_movie` behaves _exactly_ like [FFmpeg](https://ffmpeg.org/) when it comes to interpreting the parameters passed to it.
+Furthermore, `ilp_movie` uses `libav` as a _private_ dependency (as opposed to _public_/_transitive_). This means that users of `ilp_movie` are not even aware that `libav` is used in the implementation. While this requires some additional interfaces to be created, it means that `ilp_movie` can link statically against `libav` and that `ilp_movie` can be distributed without providing any `libav` header files. The main challenge, however, is to make sure that `ilp_movie` behaves _exactly_ like [FFmpeg](https://ffmpeg.org/) when it comes to interpreting the parameters passed to it. This is a solvable problem, even though it make take a few iterations before it reaches a perfect match.
+
+Besides the similar open-source plug-ins for other host applications listed above, the [FFmpeg](https://ffmpeg.org/) repository contains several good starting points for understanding how to use `libav`:
+- [encode_video](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/encode_video.c)
+- [mux.c](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/mux.c)
+- [decode_filter_video.c](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c)
+- and several other files in that same folder.
 
 
 ### Color Space
@@ -126,7 +135,7 @@ class FFmpegEncodeVideo(GafferDispatch.TaskNode):
                 img = GafferImage.ImageAlgo.image(self["in"])
                 proc.stdin.write(img["G"].toString())
                 proc.stdin.write(img["B"].toString())
-				proc.stdin.write(img["R"].toString())
+                proc.stdin.write(img["R"].toString())
 
                 IECore.msg(
                     IECore.Msg.Level.Info,
