@@ -12,23 +12,49 @@ The idea of this project is to implement nodes in [Gaffer](https://github.com/Ga
 
 ## Design
 
-There are many similarities between reading/writing movie files and image sequences. The biggest difference, however, is that image sequences are stored across multiple files, while movies are stored in a single file into which all the images have been encoded. Given these similarities a natural place to start are the existing [ImageReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/ImageReader.h)/[ImageWriter](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/ImageWriter.h) nodes in Gaffer. An important thing to note is that this node pair is hard-coded to use [OpenImageIO](https://github.com/AcademySoftwareFoundation/OpenImageIO) internally to handle various image formats. Essentially, this means that a new node pair must be introduced since a different back-end is required for movie files. In the following two section we first discuss the new [Gaffer](https://github.com/GafferHQ/gaffer) nodes that are introduced. Thereafter we present some design choices made for the Gaffer-agnostic back-end required to handle movie files.
+There are many similarities between reading/writing movie files and image sequences. The biggest difference, however, is that image sequences are stored across multiple files, while movies are stored in a single file into which all the images have been encoded. Given these similarities a natural place to start are the existing [ImageReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/ImageReader.h)/[ImageWriter](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/ImageWriter.h) nodes in [Gaffer](https://github.com/GafferHQ/gaffer). An important thing to note is that this node pair is hard-coded to use [OpenImageIO](https://github.com/AcademySoftwareFoundation/OpenImageIO) internally to handle various image formats. Essentially, this means that a new node pair must be introduced since a different back-end is required for movie files. 
+
+In the following two section we first discuss the new [Gaffer](https://github.com/GafferHQ/gaffer) nodes that are introduced. Thereafter we present some design choices made for the Gaffer-agnostic back-end required to handle movie files.
 
 ### Front-end: ilp_gaffer_movie
 
-[Gaffer](https://github.com/GafferHQ/gaffer) integration is handled by the two nodes [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp) and [MovieWriter](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_writer.hpp). Much of the logic in these nodes is very similar to the corresponding image nodes discussed above. As for the image equivalents, most of the actual work is done be internal nodes. An example showing how this is set up can be found in [this](https://miro.com/app/board/uXjVNKEP_90=/?share_link_id=36301606464) public Miro board. Noteworthy here is that there is an internal node ([AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp)) that is responsible for retrieving pixel data from a movie file for a given frame. Essentially, the [AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp) node replaces the corresponding [OpenImageIOReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/OpenImageIOReader.h) in the context of retrieving pixel data. As such, our back-end for handling movie files is connected to the [AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp) for reading from movie files, and directly to the [MovieWriter](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_writer.hpp) for writing movie files (things are a little different when writing compared to reading since this is done by a `TaskNode`).
+[Gaffer](https://github.com/GafferHQ/gaffer) integration is handled mainly by introducing the two nodes [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp) and [MovieWriter](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_writer.hpp). Much of the logic in these nodes is very similar to the corresponding image nodes discussed above. Also, the UI components are intentionally similar to the image counterparts since the workflows inside [Gaffer](https://github.com/GafferHQ/gaffer) are likely similar regardless of pixel data coming from an image sequence or a movie file. 
 
+As for Gaffer's [ImageReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/ImageReader.h), most of the actual work in the [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp) is done by internal nodes. An illustration showing the internal setup can be found in [this](https://miro.com/app/board/uXjVNKEP_90=/?share_link_id=36301606464) public Miro board. Noteworthy here is that there is an internal node ([AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp)) responsible for retrieving pixel data from a movie file for a given frame. Essentially, the [AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp) node replaces the corresponding [OpenImageIOReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/OpenImageIOReader.h) in the context of retrieving pixel data from disk. One thing to note is that color space management is handled internally by the [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp) node. As it turns out, reconciling the color space management between [OpenColorIO](https://github.com/AcademySoftwareFoundation/OpenColorIO) and `libav` is not trivial, which is discussed later on.
 
-However, things like parsing filenumber expressions and handling various [OpenEXR](https://github.com/AcademySoftwareFoundation/openexr) properties (e.g. deep images) can be skipped, since these are not applicable to movie files. The frame masking logic still applies though, i.e. how to handle the Gaffer UI requesting a non-existing frame from a movie. 
+The [AvReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/av_reader.hpp) node uses our back-end, discussed in the following section, to retrieve pixel data from movie files. It also uses a frame cache to support more interactive "scrubbing" by storing some amount of frames that have previously been decoded. Although similar to its [OpenImageIOReader](https://github.com/GafferHQ/gaffer/blob/main/include/GafferImage/OpenImageIOReader.h) counterpart, things like parsing file number expressions and handling various [OpenEXR](https://github.com/AcademySoftwareFoundation/openexr) properties (e.g. deep images) can be skipped, since these are not applicable to movie files. Frame masking logic, however, still applies, including how to handle requests for non-existing frames of a movie. 
 
-
+The [MovieWriter](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_writer.hpp) is arguably simpler than the [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp) and is implemented as a `TaskNode`. Here the goal is to export frames from within [Gaffer](https://github.com/GafferHQ/gaffer) to a movie file on disk. The heavy lifting in terms of encoding is done by our back-end, as will be discussed next. It is noteworthy that color space needs to be handled in the case of writing as well, but in general writing is simpler than reading since it is mostly about generating pixel data for a given, fixed frame range.
 
 ### Back-end: ilp_movie
 
-### Color Spaces
+As mentioned, [FFmpeg](https://ffmpeg.org/) is a command-line application used for video editing. In particular, it is probably fair to say, [FFmpeg](https://ffmpeg.org/) is used for various encoding tasks in which image sequences are transformed into movie files (or movie files being "transcoded" into modified movie files). Now, in order to perform similar tasks within an application it is not possible to use [FFmpeg](https://ffmpeg.org/) directly without first launching it as a sub-process and somehow piping the pixel data to that process. An example of how this might be done using a Python node in [Gaffer](https://github.com/GafferHQ/gaffer) is given in the [appendix](#ffmpeg-encode-in-python).
+
+The main benefit of doing it this way is that there are plenty of recommendations available on how to use [FFmpeg](https://ffmpeg.org/) to achieve satisfactory results. These recommendations can be followed by simply using the suggested command-line options. For instance, the [ASWF Open Review Initiative](https://academysoftwarefoundation.github.io/EncodingGuidelines/) (ORI) has published encoding guidelines for the VFX community targeting a number of different codecs. As an example, here are the recommended parameters when using a `H264` encoder to make a movie suitable for web review:
+```
+ffmpeg -r 24 -start_number 100 -i inputfile.%04d.png -frames:v 200 -c:v libx264 \
+        -pix_fmt yuv420p10le -crf 18 -preset slow \
+        -sws_flags spline+accurate_rnd+full_chroma_int \
+        -vf "scale=in_range=full:in_color_matrix=bt709:out_range=tv:out_color_matrix=bt709" \
+        -color_range 1 -colorspace 1 -color_primaries 1 -color_trc 2 \
+        -movflags faststart -y outputfile.mp4
+```
+An explanation of these parameters can be found [here](https://academysoftwarefoundation.github.io/EncodingGuidelines/Encodeh264.html). Similar recommendations are available for other codecs as well and they follow the pattern of converting an image sequence on disk (`inputfile.####.*`) to a movie file (`outputfile.*`). 
+
+As mentioned above, the [FFmpeg](https://ffmpeg.org/) command-line application is implemented on top of a set of libraries known as `libav`. Essentially, this enables developers to implement FFmpeg-like behaviour in other applications using the `libav` libraries. However, in order to be compliant with recommended [FFmpeg](https://ffmpeg.org/) commands, such implementations support the relevant parameters and must interpret every parameter _exactly_ the same way that [FFmpeg](https://ffmpeg.org/) does. Now, while [FFmpeg](https://ffmpeg.org/) is open-source, making it possible to see what's going on, it supports a staggering amount of different parameters. Granted, all of these parameters are not relevant, but digging through the source code to find specific details can be a daunting task.
+
+To encapsulate some of the complexities that come with using `libav`, a back-end module called `ilp_movie` was introduced. The main functionality of this module is take an image that resides in memory (as opposed to being stored in a file on disk) and pass that image to an encoder (and vice versa for decoding). This enables skipping the step of converting one image sequence into another on disk before encoding, and allows pixel data from movie files to be presented in [Gaffer](https://github.com/GafferHQ/gaffer). An advantage to this approach is that `ilp_movie` could potentially be re-used in other projects, since it has no dependecies on [Gaffer](https://github.com/GafferHQ/gaffer).
+
+Furthermore, `ilp_movie` uses `libav` as a _private_ dependency (as opposed to _public_/_transitive_). This means that users of `ilp_movie` are not even aware that `libav` is used in the implementation. While this requires some additional work, it means that `ilp_movie` can link statically against `libav` and that `ilp_movie` can be distributed without providing any `libav` header files. The main challenge, however, is to make sure that `ilp_movie` behaves _exactly_ like [FFmpeg](https://ffmpeg.org/) when it comes to interpreting the parameters passed to it.
+
+
+### Color Space
 Handled in [MovieReader](https://github.com/ilpvfx/ilp_gaffer_movie/blob/main/include/ilp_gaffer_movie/movie_reader.hpp), so we need to know what the pixel data we get from the encoder actually represents.
 
 Links to interesting articles...
+
+
+[FFmpeg color space](https://trac.ffmpeg.org/wiki/colorspace)
 
 
 ## Developer Notes
@@ -46,4 +72,100 @@ export GAFFER_EXTENSION_PATHS=$repo/out/install/unixlike-gcc-debug:$GAFFER_EXTEN
 
 # Print log messages from Gaffer.
 export IECORE_LOG_LEVEL=Info
+```
+
+
+## Appendix
+
+### FFmpeg Encode in Python
+
+A simplified example of how a [Gaffer](https://github.com/GafferHQ/gaffer) node authored in Python can be used to pipe data to [FFmpeg](https://ffmpeg.org/) running as a sub-process.
+
+```python
+import shlex
+import subprocess
+from typing import List
+
+import IECore
+
+import Gaffer
+import GafferDispatch
+import GafferImage
+
+
+class FFmpegEncodeVideo(GafferDispatch.TaskNode):
+    def __init__(self, name: str = "FFmpegEncodeVideo") -> None:
+        super().__init__(name)
+
+        self["in"] = GafferImage.ImagePlug()
+        self["out"] = GafferImage.ImagePlug(direction=Gaffer.Plug.Direction.Out)
+        self["out"].setInput(self["in"])
+
+        self["fileName"] = Gaffer.StringPlug()
+        self["codec"] = Gaffer.StringPlug(
+            defaultValue="-c:v mjpeg -qscale:v 2 -vendor ap10 -pix_fmt yuvj444p"
+        )
+
+    def executeSequence(self, frames: List[float]) -> None:
+        with Gaffer.Context(Gaffer.Context.current()) as context:
+            context.setFrame(frames[0])
+
+            if self["in"].deep():
+                raise RuntimeError("Deep is not supported...")
+
+            cmd = "ffmpeg -y -f rawvideo -pix_fmt gbrpf32le -s {format} -r {framesPerSecond} -i - {codec} {fileName}".format(
+                format=self["in"]["format"].getValue(),
+                framesPerSecond=context.getFramesPerSecond(),
+                codec=self["codec"].getValue(),
+                fileName=self["fileName"].getValue()
+            )
+            proc = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            for frame in frames:
+                context.setFrame(frame)
+
+                img = GafferImage.ImageAlgo.image(self["in"])
+                proc.stdin.write(img["G"].toString())
+                proc.stdin.write(img["B"].toString())
+				proc.stdin.write(img["R"].toString())
+
+                IECore.msg(
+                    IECore.Msg.Level.Info,
+                    self.relativeName(self.scriptNode()),
+                    f"Writing {frame}",
+                )
+
+            proc.stdin.close()
+            proc.wait()
+
+    def hash(self, context: Gaffer.Context) -> IECore.MurmurHash:
+        h = super().hash(context)
+        h.append(context.getFrame())
+
+        return h
+
+    def requiresSequenceExecution(self) -> bool:
+        return True
+
+
+Gaffer.Metadata.registerNode(
+
+    FFmpegEncodeVideo,
+
+    plugs={
+        "in": [
+            "nodule:type", "GafferUI::StandardNodule",
+        ],
+        "fileName": [
+            "plugValueWidget:type", "GafferUI.FileSystemPathPlugValueWidget",
+            "fileSystemPath:extensions", "mov",
+            "fileSystemPath:extensionsLabel", "Show only supported files",
+            "fileSystemPath:includeSequences", False,
+        ]
+    },
+)
+
+
+IECore.registerRunTimeTyped(
+    FFmpegEncodeVideo, typeName="Foobar::FFmpegEncodeVideo"
+)
 ```
