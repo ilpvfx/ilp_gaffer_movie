@@ -5,6 +5,7 @@
 #include <cstdint>// uint8_t, int64_t, etc
 #include <memory>// std::unique_ptr
 #include <optional>// std::optional
+#include <type_traits>// std::is_same_v, std::decay_t
 
 #include "ilp_movie/ilp_movie_export.hpp"
 
@@ -26,7 +27,7 @@ namespace ColorRange {
 }// namespace ColorRange
 
 namespace Colorspace {
-  constexpr const char* kBt709 = "bt709";
+  constexpr const char *kBt709 = "bt709";
 }// namespace Colorspace
 
 namespace ColorTrc {
@@ -141,5 +142,17 @@ template<typename PixelT>
   Comp::ValueType c,
   int height,
   const char *pix_fmt_name) noexcept -> PixelData<PixelT>;
+
+// Convenience function for accessing component pixel data from a frame (view).
+template<typename PixelT, typename FrameT>
+[[nodiscard]] ILP_MOVIE_EXPORT auto CompPixelData(const FrameT &frame,
+  const Comp::ValueType c) noexcept -> PixelData<PixelT>
+{
+  static_assert(
+    std::is_same_v<std::decay_t<FrameT>, Frame> || std::is_same_v<std::decay_t<FrameT>, FrameView>);
+
+  return CompPixelData<PixelT>(
+    frame.data, frame.linesize, c, frame.hdr.height, frame.hdr.pix_fmt_name);
+}
 
 }// namespace ilp_movie

@@ -61,7 +61,7 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    // Store pointer to stream, the format context still owns the stream.
+    // Store pointer to AVStream, the format context still owns the AVStream.
     assert(_av_stream == nullptr);// NOLINT
     _av_stream = av_fmt_ctx->streams[stream_index];// NOLINT
 
@@ -69,6 +69,18 @@ public:
       log_utils_internal::LogAvError("Only video streams supported", AVERROR(EINVAL));
       return exit_func(/*success=*/false);
     }
+
+    // NOTE(tohi): Should we lookup decoder by name instead? For instance:
+    // 
+    // const AVCodec codec = nullptr;
+    // if (_av_stream->codecpar->codec_id == AV_CODEC_ID_PRORES) {
+    //   codec = avcodec_find_decoder_by_name("prores_ks");       
+    // }
+    // 
+    // // Fallback to ID.
+    // if (codec == nullptr) {
+    //   codec = avcodec_find_decoder(_av_stream->codecpar->codec_id);
+    // }
 
     const AVCodec *codec = avcodec_find_decoder(_av_stream->codecpar->codec_id);
     if (codec == nullptr) {
@@ -96,7 +108,7 @@ public:
 #endif
     }
 
-    // Copy decoder parameters to the input stream.
+    // Copy parameters to the codec context.
     if (const int ret = avcodec_parameters_to_context(_av_codec_ctx, _av_stream->codecpar);
         ret < 0) {
       log_utils_internal::LogAvError("Cannot copy stream parameters to the decoder", ret);
@@ -219,13 +231,12 @@ public:
     return ret >= 0 && keep_going;
   }
 
-  [[nodiscard]] auto Header() const noexcept -> ilp_movie::InputVideoStreamHeader
+  [[nodiscard]] auto MakeHeader() const noexcept -> std::optional<ilp_movie::InputVideoStreamHeader>
   {
-    ilp_movie::InputVideoStreamHeader hdr{};
-
     // Check if stream is not open.
-    if (_av_stream == nullptr) { return hdr; }
+    if (_av_stream == nullptr || _av_codec_ctx == nullptr ) { return std::nullopt; }
 
+    ilp_movie::InputVideoStreamHeader hdr{};
     hdr.stream_index = _av_stream->index;
     hdr.width = _av_codec_ctx->width;
     hdr.height = _av_codec_ctx->height;
@@ -439,7 +450,12 @@ public:
         }
 
         // Cache video stream header information.
-        _video_stream_headers.push_back(video_stream->Header());
+        const auto hdr = video_stream->MakeHeader();
+        if (!hdr.has_value()) {
+          LogMsg(LogLevel::kError, "Cannot make video stream header\n");
+          return exit_func(/*success=*/false);
+        }
+        _video_stream_headers.push_back(*hdr);
 
         _video_streams[stream_index] = { std::move(video_stream), std::move(fg) };
       }
@@ -486,7 +502,10 @@ public:
     _video_streams.clear();
   }
 
-  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> int { return _best_video_stream; }
+  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> std::optional<int> { 
+    if (!(_best_video_stream >= 0)) { return std::nullopt; }
+    return _best_video_stream; 
+  }
 
   [[nodiscard]] auto VideoStreamHeaders() const noexcept
     -> const std::vector<InputVideoStreamHeader> &
@@ -629,52 +648,6 @@ public:
                   return keep_going_filt;
                 }
 
-#if 0
-                if (const int r =
-                      av_image_fill_linesizes(frame.linesize.data(), pix_fmt, frame.hdr.width);
-                    r < 0) {
-                  log_utils_internal::LogAvError("Cannot fill linesizes", r);
-                  return keep_going_filt;
-                }
-
-                if (const int r = av_image_fill_pointers(frame.data.data(),
-                      pix_fmt,
-                      frame.hdr.height,
-                      frame.buf.get(),
-                      frame.linesize.data());
-                    r < 0) {
-                  log_utils_internal::LogAvError("Cannot fill pointers", r);
-                  return keep_going_filt;
-                }
-#endif
-
-              // av_image_check_size av_image_fill_linesizes av_image_fill_plane_sizes
-              //   av_image_fill_pointers
-#if 0
-
-                frame.buf.count = frame.hdr.pix_fmt_desc.nb_comp
-                                  * static_cast<std::size_t>(frame.hdr.width * frame.hdr.height);
-                frame.buf.data = std::make_unique<float[]>(frame.buf.count);// NOLINT
-                for (uint8_t i = 0U; i < frame.hdr.pix_fmt_desc.nb_comp; ++i) {
-                  auto pix = PlanePixelData(frame.hdr.width,
-                    frame.hdr.height,
-                    frame.pix_fmt_desc.comp[i].plane,
-                    frame.buf.data.get(),
-                    frame.buf.count);
-                  assert(!Empty(pix));// NOLINT
-
-
-                  AVBufferRef *p_buf =
-                    av_frame_get_plane_buffer(filt_frame, pix_fmt_desc->comp[i].plane);
-                  assert(p_buf != nullptr);// NOLINT
-                  std::memcpy(pix.data, p_buf->data, p_buf->size);
-
-                  assert(filt_frame->data[pix_fmt_desc->comp[i].plane] != nullptr);// NOLINT
-                  std::memcpy(pix.data,
-                    filt_frame->data[pix_fmt_desc->comp[i].plane],
-                    pix.count * sizeof(float));// NOLINT
-                }
-#endif
                 got_frame = true;
                 return keep_going_filt;
               }
@@ -735,7 +708,7 @@ auto Decoder::Probe() const noexcept -> const std::string & { return _Pimpl()->P
 
 void Decoder::Close() noexcept { _Pimpl()->Close(); }
 
-auto Decoder::BestVideoStreamIndex() const noexcept -> int
+auto Decoder::BestVideoStreamIndex() const noexcept -> std::optional<int>
 {
   return _Pimpl()->BestVideoStreamIndex();
 }

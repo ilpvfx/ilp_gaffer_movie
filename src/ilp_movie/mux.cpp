@@ -661,7 +661,6 @@ auto MuxWriteFrame(const MuxContext &mux_ctx, const FrameView &frame) noexcept -
     dec_frame);
 }
 
-
 auto MuxFinish(const MuxContext &mux_ctx) noexcept -> bool
 {
   // Flush filter.
