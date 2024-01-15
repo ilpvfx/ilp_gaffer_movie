@@ -186,12 +186,13 @@ Gaffer.Metadata.registerNode(
 			`MovieReader::setDefaultColorSpaceFunction()`.
 			""",
 
+			"openColorIO:includeRoles", True,
 			"presetNames", OpenColorIOTransformUI.colorSpacePresetNames,
 			"presetValues", OpenColorIOTransformUI.colorSpacePresetValues,
 			"openColorIO:categories", "file-io",
 			"openColorIO:extraPresetNames", IECore.StringVectorData( [ "Automatic" ] ),
 			"openColorIO:extraPresetValues", IECore.StringVectorData( [ "" ] ),
-
+			
 			"plugValueWidget:type", "IlpGafferMovieUI.MovieReaderUI._ColorSpacePlugValueWidget",
 
 		],

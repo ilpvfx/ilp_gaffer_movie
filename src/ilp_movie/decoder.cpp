@@ -5,9 +5,9 @@
 #include <map>// std::map
 #include <sstream>// std::istringstream, std::ostringstream
 
-#include <ilp_movie/pixel_data.hpp>
-#include <internal/filter_graph.hpp>
-#include <internal/log_utils.hpp>
+#include "ilp_movie/frame.hpp"
+#include "internal/filter_graph.hpp"
+#include "internal/log_utils.hpp"
 
 // clang-format off
 extern "C" {
@@ -15,6 +15,7 @@ extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/dict.h>
 #include <libavutil/opt.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/timestamp.h>
@@ -50,13 +51,17 @@ public:
 
     _Close();
 
-    if (!(av_fmt_ctx != nullptr && 0 <= stream_index
-          && stream_index < static_cast<int>(av_fmt_ctx->nb_streams))) {
-      log_utils_internal::LogAvError("Bad format context or stream index", AVERROR(EINVAL));
+    if (av_fmt_ctx == nullptr) {
+      log_utils_internal::LogAvError("Bad format context", AVERROR(EINVAL));
       return exit_func(/*success=*/false);
     }
 
-    // Store pointer to stream, the format context still owns the stream.
+    if (!(0 <= stream_index && stream_index < static_cast<int>(av_fmt_ctx->nb_streams))) {
+      log_utils_internal::LogAvError("Bad stream index", AVERROR(EINVAL));
+      return exit_func(/*success=*/false);
+    }
+
+    // Store pointer to AVStream, the format context still owns the AVStream.
     assert(_av_stream == nullptr);// NOLINT
     _av_stream = av_fmt_ctx->streams[stream_index];// NOLINT
 
@@ -64,6 +69,18 @@ public:
       log_utils_internal::LogAvError("Only video streams supported", AVERROR(EINVAL));
       return exit_func(/*success=*/false);
     }
+
+    // NOTE(tohi): Should we lookup decoder by name instead? For instance:
+    // 
+    // const AVCodec codec = nullptr;
+    // if (_av_stream->codecpar->codec_id == AV_CODEC_ID_PRORES) {
+    //   codec = avcodec_find_decoder_by_name("prores_ks");       
+    // }
+    // 
+    // // Fallback to ID.
+    // if (codec == nullptr) {
+    //   codec = avcodec_find_decoder(_av_stream->codecpar->codec_id);
+    // }
 
     const AVCodec *codec = avcodec_find_decoder(_av_stream->codecpar->codec_id);
     if (codec == nullptr) {
@@ -91,7 +108,7 @@ public:
 #endif
     }
 
-    // Copy decoder parameters to the input stream.
+    // Copy parameters to the codec context.
     if (const int ret = avcodec_parameters_to_context(_av_codec_ctx, _av_stream->codecpar);
         ret < 0) {
       log_utils_internal::LogAvError("Cannot copy stream parameters to the decoder", ret);
@@ -157,6 +174,7 @@ public:
 
   [[nodiscard]] auto FrameCount() const noexcept -> int64_t { return _frame_count; }
 
+  // Convert (zero-based) frame index to presentation time-stamp (PTS).
   [[nodiscard]] auto FrameToPts(const int frame_index) const noexcept -> int64_t
   {
     const int64_t num =
@@ -211,6 +229,42 @@ public:
       av_frame_unref(_av_frame);
     }
     return ret >= 0 && keep_going;
+  }
+
+  [[nodiscard]] auto MakeHeader() const noexcept -> std::optional<ilp_movie::InputVideoStreamHeader>
+  {
+    // Check if stream is not open.
+    if (_av_stream == nullptr || _av_codec_ctx == nullptr ) { return std::nullopt; }
+
+    ilp_movie::InputVideoStreamHeader hdr{};
+    hdr.stream_index = _av_stream->index;
+    hdr.width = _av_codec_ctx->width;
+    hdr.height = _av_codec_ctx->height;
+
+    // clang-format off
+    hdr.frame_rate = { 
+      /*.num=*/_frame_rate.num, 
+      /*.den=*/_frame_rate.den };
+    hdr.pixel_aspect_ratio = { 
+      /*.num=*/_av_stream->sample_aspect_ratio.num,
+      /*.den=*/_av_stream->sample_aspect_ratio.den };
+    if (_av_stream->sample_aspect_ratio.num > 0) {
+      av_reduce(&hdr.display_aspect_ratio.num, &hdr.display_aspect_ratio.den,
+        _av_stream->codecpar->width * static_cast<int64_t>(_av_stream->sample_aspect_ratio.num),
+        _av_stream->codecpar->height * static_cast<int64_t>(_av_stream->sample_aspect_ratio.den),
+        1024 * 1024);
+    }
+    // clang-format on
+
+    hdr.first_frame_nb = 1;// Good??
+    hdr.frame_count = _frame_count;
+
+    hdr.pix_fmt_name = av_get_pix_fmt_name(_av_codec_ctx->pix_fmt);
+    hdr.color_range_name = av_color_range_name(_av_codec_ctx->color_range);
+    hdr.color_space_name = av_color_space_name(_av_codec_ctx->colorspace);
+    hdr.color_trc_name = av_color_transfer_name(_av_codec_ctx->color_trc);
+    hdr.color_primaries_name = av_color_primaries_name(_av_codec_ctx->color_primaries);
+    return hdr;
   }
 
 private:
@@ -315,8 +369,23 @@ public:
 
     Close();
 
+    assert(_av_packet == nullptr);// NOLINT
+    _av_packet = av_packet_alloc();
+    if (_av_packet == nullptr) {
+      log_utils_internal::LogAvError("Cannot allocate packet for decoding", AVERROR(ENOMEM));
+      return exit_func(/*success=*/false);
+    }
+
     _url = url;
     assert(_av_fmt_ctx == nullptr);// NOLINT
+
+    _av_fmt_ctx = avformat_alloc_context();
+    if (_av_fmt_ctx == nullptr) {
+      log_utils_internal::LogAvError("Cannot allocate context for decoding", AVERROR(ENOMEM));
+      return exit_func(/*success=*/false);
+    }
+    _av_fmt_ctx->flags |= AVFMT_FLAG_GENPTS;// NOLINT
+
     if (const int ret =
           avformat_open_input(&_av_fmt_ctx, _url.c_str(), /*fmt=*/nullptr, /*options=*/nullptr);
         ret < 0) {
@@ -329,8 +398,7 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    _av_fmt_ctx->flags |= AVFMT_FLAG_GENPTS;// NOLINT
-
+    // Find the "best" video stream.
     assert(_best_video_stream == -1);// NOLINT
     _best_video_stream = av_find_best_stream(_av_fmt_ctx,
       AVMEDIA_TYPE_VIDEO,
@@ -344,7 +412,7 @@ public:
       return exit_func(/*success=*/false);
     }
 
-    // NOTE(tohi): Not using multi-threading for now.
+    // NOTE(tohi): Not using multi-threading for now. Should test before enabling.
     constexpr int kThreadCount = 0;
 
     // Create and open all video streams.
@@ -353,19 +421,20 @@ public:
         auto video_stream = std::make_unique<Stream>();
         const int stream_index = _av_fmt_ctx->streams[i]->index;// NOLINT
         if (!video_stream->Open(_av_fmt_ctx, stream_index, kThreadCount)) {
-          LogMsg(LogLevel::kError, "Failed opening video stream\n");
+          LogMsg(LogLevel::kError, "Failed opening video stream for decoding\n");
           return exit_func(/*success=*/false);
         }
 
         // Create filter graph for video stream.
-        // Each video stream requires its own filter graph instance since the inputs
-        // configuerd from the codec/stream parameters.
+        // Each video stream requires its own filter graph instance since the inputs are
+        // configured from the codec/stream parameters.
         const AVPixelFormat out_pix_fmt = av_get_pix_fmt(dfgd.out_pix_fmt_name.c_str());
         if (out_pix_fmt == AV_PIX_FMT_NONE) {
-          LogMsg(LogLevel::kError, "Unrecognized filter graph output pixel format\n");
+          LogMsg(LogLevel::kError, "Unrecognized filter graph output pixel format for decoding\n");
           return exit_func(/*success=*/false);
         }
 
+        // Construct filter graph.
         filter_graph_internal::FilterGraphDescription fg_descr{};
         fg_descr.filter_descr = dfgd.filter_descr;
         fg_descr.in.width = video_stream->CodecContext()->width;
@@ -376,48 +445,23 @@ public:
         fg_descr.out.pix_fmt = out_pix_fmt;
         auto fg = std::make_unique<filter_graph_internal::FilterGraph>();
         if (!fg->SetDescription(fg_descr)) {
-          LogMsg(LogLevel::kError, "Failed constructing default filter graph\n");
+          LogMsg(LogLevel::kError, "Failed constructing filter graph for decoding\n");
           return exit_func(/*success=*/false);
         }
 
-        // Populate video stream header information.
-        // clang-format off
-        InputVideoStreamHeader hdr{};
-        hdr.stream_index = video_stream->Get()->index;
-        hdr.is_best = (hdr.stream_index == _best_video_stream);
-        hdr.width = video_stream->CodecContext()->width;
-        hdr.height = video_stream->CodecContext()->height;
-        hdr.frame_rate = { 
-          /*.num=*/video_stream->FrameRate().num,
-          /*.den=*/video_stream->FrameRate().den };
-        hdr.pixel_aspect_ratio = { 
-          /*.num=*/video_stream->CodecContext()->sample_aspect_ratio.num,
-          /*.den=*/video_stream->CodecContext()->sample_aspect_ratio.den };
-        hdr.first_frame_nb = 1;// Good??
-        hdr.frame_count = video_stream->FrameCount();
-        hdr.pix_fmt_name = 
-          av_get_pix_fmt_name(video_stream->CodecContext()->pix_fmt);
-        hdr.color_range_name = 
-          av_color_range_name(video_stream->CodecContext()->color_range);
-        hdr.color_space_name = 
-          av_color_space_name(video_stream->CodecContext()->colorspace);
-        hdr.color_primaries_name =
-          av_color_primaries_name(video_stream->CodecContext()->color_primaries);
-        // clang-format on
-
-        _video_stream_headers.push_back(hdr);
+        // Cache video stream header information.
+        const auto hdr = video_stream->MakeHeader();
+        if (!hdr.has_value()) {
+          LogMsg(LogLevel::kError, "Cannot make video stream header\n");
+          return exit_func(/*success=*/false);
+        }
+        _video_stream_headers.push_back(*hdr);
 
         _video_streams[stream_index] = { std::move(video_stream), std::move(fg) };
       }
     }
 
-    assert(_av_packet == nullptr);// NOLINT
-    _av_packet = av_packet_alloc();
-    if (_av_packet == nullptr) {
-      log_utils_internal::LogAvError("Cannot allocate packet for decoding", AVERROR(ENOMEM));
-      return exit_func(/*success=*/false);
-    }
-
+    assert(_probe.empty());// NOLINT
     _probe = std::invoke([&]() {
       const auto push_cb = GetLogCallback();
       const int push_log_level = GetLogLevel();
@@ -439,11 +483,12 @@ public:
   [[nodiscard]] auto Url() const noexcept -> const std::string & { return _url; }
   [[nodiscard]] auto Probe() const noexcept -> const std::string & { return _probe; }
 
-  void Close()
+  void Close() noexcept
   {
     _url.clear();
     _probe.clear();
     if (_av_fmt_ctx != nullptr) {
+      // Calls avformat_free_context internally.
       avformat_close_input(&_av_fmt_ctx);
       assert(_av_fmt_ctx == nullptr);// NOLINT
     }
@@ -457,33 +502,36 @@ public:
     _video_streams.clear();
   }
 
-  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> int { return _best_video_stream; }
+  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> std::optional<int> { 
+    if (!(_best_video_stream >= 0)) { return std::nullopt; }
+    return _best_video_stream; 
+  }
 
-  [[nodiscard]] auto VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
+  [[nodiscard]] auto VideoStreamHeaders() const noexcept
+    -> const std::vector<InputVideoStreamHeader> &
   {
     return _video_stream_headers;
   }
 
-  [[nodiscard]] auto VideoStreamHeader(const int stream_index) const
+  [[nodiscard]] auto VideoStreamHeader(const int stream_index) const noexcept
     -> std::optional<InputVideoStreamHeader>
   {
-    if (_video_stream_headers.empty()) { return std::nullopt; }
+    // In the special case of -1 being passed substitute the search index
+    // to be the "best" video stream index. After this potential substitution
+    // the search index should be greater than or equal to zero.
+    const int search_index = stream_index == -1 ? _best_video_stream : stream_index;
+    if (!(search_index >= 0)) { return std::nullopt; }
 
-    const int index = stream_index == -1 ? _best_video_stream : stream_index;
-    if (index < 0) { return std::nullopt; }
-
-    // Linear search.
-    for (auto &&h : _video_stream_headers) {
-      if (h.stream_index == index) { return h; }
+    // Linear search, only video streams.
+    for (auto &&hdr : _video_stream_headers) {
+      if (hdr.stream_index == search_index) { return hdr; }
     }
 
     // No suitable header found.
     return std::nullopt;
   }
 
-
-  [[nodiscard]] auto
-    DecodeVideoFrame(int stream_index, int frame_nb, DecodedVideoFrame &dvf) noexcept -> bool
+  [[nodiscard]] auto DecodeVideoFrame(int stream_index, int frame_nb, Frame &frame) noexcept -> bool
   {
     const int index = stream_index == -1 ? _best_video_stream : stream_index;
 
@@ -546,53 +594,60 @@ public:
                 // This is our one chance.
                 keep_going_filt = false;
 
-                dvf.pix_fmt = PixelFormat::kNone;
-                switch (filt_frame->format) {
-                case AV_PIX_FMT_GRAYF32:
-                  dvf.pix_fmt = PixelFormat::kGray;
-                  break;
-                case AV_PIX_FMT_GBRPF32:
-                  dvf.pix_fmt = PixelFormat::kRGB;
-                  break;
-                case AV_PIX_FMT_GBRAPF32:
-                  dvf.pix_fmt = PixelFormat::kRGBA;
-                  break;
-                default:
-                  LogMsg(LogLevel::kError, "Unsupported pixel format\n");
-                  return keep_going_filt;
-                }
+                const auto pix_fmt = static_cast<AVPixelFormat>(filt_frame->format);
+
+                // Translate frame header.
 
                 // clang-format off
-                dvf.width = filt_frame->width;
-                dvf.height = filt_frame->height;
-                dvf.key_frame = filt_frame->key_frame > 0;
-                dvf.frame_nb = frame_nb;
-                dvf.pixel_aspect_ratio = { 
+                frame.hdr.width = filt_frame->width;
+                frame.hdr.height = filt_frame->height;
+                assert(frame.hdr.width > 0 && frame.hdr.height > 0);// NOLINT
+                frame.hdr.key_frame = filt_frame->key_frame > 0;
+                frame.hdr.frame_nb = frame_nb;
+                frame.hdr.pixel_aspect_ratio = { 
                   /*.num=*/filt_frame->sample_aspect_ratio.num,
                   /*.den=*/filt_frame->sample_aspect_ratio.den 
                 };
+                frame.hdr.pix_fmt_name = av_get_pix_fmt_name(pix_fmt);
+                frame.hdr.color_range_name = av_color_range_name(filt_frame->color_range);
+                frame.hdr.color_space_name = av_color_space_name(filt_frame->colorspace);
+                frame.hdr.color_trc_name = av_color_transfer_name(filt_frame->color_trc);
+                frame.hdr.color_primaries_name = av_color_primaries_name(filt_frame->color_primaries);
                 // clang-format on
 
-                constexpr std::array<Channel, 4> kChannels = {
-                  Channel::kGreen,
-                  Channel::kBlue,
-                  Channel::kRed,
-                  Channel::kAlpha,
-                };
-
-                const std::size_t channel_count = ChannelCount(dvf.pix_fmt);
-                assert(0U < channel_count && channel_count < 4U);// NOLINT
-                assert(dvf.width > 0 && dvf.height > 0);// NOLINT
-
-                dvf.buf.count = channel_count * static_cast<std::size_t>(dvf.width * dvf.height);
-                dvf.buf.data = std::make_unique<float[]>(dvf.buf.count);// NOLINT
-                for (std::size_t i = 0U; i < channel_count; ++i) {
-                  const auto ch = channel_count > 1U ? kChannels.at(i) : Channel::kGray;
-                  auto pix = ChannelData(&dvf, ch);// NOLINT
-                  assert(!Empty(pix));// NOLINT
-                  assert(filt_frame->data[i] != nullptr);// NOLINT
-                  std::memcpy(pix.data, filt_frame->data[i], pix.count * sizeof(float));// NOLINT
+                // Allocate buffer.
+                const auto buf_size =
+                  GetBufferSize(frame.hdr.pix_fmt_name, frame.hdr.width, frame.hdr.height);
+                if (!buf_size.has_value()) {
+                  log_utils_internal::LogAvError("Cannot get image buffer size", AVERROR(EINVAL));
+                  return keep_going_filt;
                 }
+                frame.buf = std::make_unique<uint8_t[]>(*buf_size);// NOLINT
+
+                // Setup arrays.
+                if (!FillArrays(/*out*/ frame.data,
+                      /*out*/ frame.linesize,
+                      frame.buf.get(),
+                      frame.hdr.pix_fmt_name,
+                      frame.hdr.width,
+                      frame.hdr.height)) {
+                  return keep_going_filt;
+                }
+
+                // Copy frame contents to buffer.
+                if (const int bytes_written = av_image_copy_to_buffer(frame.buf.get(),
+                      static_cast<int>(*buf_size),
+                      filt_frame->data,// NOLINT
+                      filt_frame->linesize,// NOLINT
+                      pix_fmt,
+                      frame.hdr.width,
+                      frame.hdr.height,
+                      /*align=*/1);
+                    bytes_written < 0) {
+                  log_utils_internal::LogAvError("Cannot copy image to buffer", bytes_written);
+                  return keep_going_filt;
+                }
+
                 got_frame = true;
                 return keep_going_filt;
               }
@@ -628,7 +683,7 @@ private:
   };
 
   std::map<int, FilteredStream> _video_streams;
-};// namespace ilp_movie
+};
 
 // -----------
 
@@ -643,37 +698,36 @@ Decoder::~Decoder() = default;
 auto Decoder::Open(const std::string &url, const DecoderFilterGraphDescription &dfgd) noexcept
   -> bool
 {
-  return Pimpl()->Open(url, dfgd);
+  return _Pimpl()->Open(url, dfgd);
 }
 
-auto Decoder::IsOpen() const noexcept -> bool { return Pimpl()->IsOpen(); }
+auto Decoder::IsOpen() const noexcept -> bool { return _Pimpl()->IsOpen(); }
 
-auto Decoder::Url() const noexcept -> const std::string & { return Pimpl()->Url(); }
-auto Decoder::Probe() const noexcept -> const std::string & { return Pimpl()->Probe(); }
+auto Decoder::Url() const noexcept -> const std::string & { return _Pimpl()->Url(); }
+auto Decoder::Probe() const noexcept -> const std::string & { return _Pimpl()->Probe(); }
 
-void Decoder::Close() noexcept { Pimpl()->Close(); }
+void Decoder::Close() noexcept { _Pimpl()->Close(); }
 
-auto Decoder::BestVideoStreamIndex() const noexcept -> int
+auto Decoder::BestVideoStreamIndex() const noexcept -> std::optional<int>
 {
-  return Pimpl()->BestVideoStreamIndex();
+  return _Pimpl()->BestVideoStreamIndex();
 }
 
-auto Decoder::VideoStreamHeaders() const -> const std::vector<InputVideoStreamHeader> &
+auto Decoder::VideoStreamHeaders() const noexcept -> const std::vector<InputVideoStreamHeader> &
 {
-  return Pimpl()->VideoStreamHeaders();
+  return _Pimpl()->VideoStreamHeaders();
 }
 
-auto Decoder::VideoStreamHeader(const int stream_index) const
+auto Decoder::VideoStreamHeader(const int stream_index) const noexcept
   -> std::optional<InputVideoStreamHeader>
 {
-  return Pimpl()->VideoStreamHeader(stream_index);
+  return _Pimpl()->VideoStreamHeader(stream_index);
 }
 
-auto Decoder::DecodeVideoFrame(const int stream_index,
-  const int frame_nb,
-  DecodedVideoFrame &dvf) noexcept -> bool
+auto Decoder::DecodeVideoFrame(const int stream_index, const int frame_nb, Frame &frame) noexcept
+  -> bool
 {
-  return Pimpl()->DecodeVideoFrame(stream_index, frame_nb, dvf);
+  return _Pimpl()->DecodeVideoFrame(stream_index, frame_nb, frame);
 }
 
 }// namespace ilp_movie

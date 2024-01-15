@@ -4,13 +4,14 @@
 
 #include <Gaffer/NumericPlug.h>
 
-#include <memory>
+#include <memory>// std::shared_ptr
+#include <optional>// std::optional
 #include <string>// std::string
 #include <vector>// std::vector
 
 
-#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
-#include <ilp_gaffer_movie/type_id.hpp>
+#include "ilp_gaffer_movie/ilp_gaffer_movie_export.hpp"
+#include "ilp_gaffer_movie/type_id.hpp"
 
 namespace Gaffer {
 IE_CORE_FORWARDDECLARE(StringPlug)

@@ -28,15 +28,15 @@ FrameLRUCache &cache()
       }
 
       try {
-        auto dvf = std::make_unique<ilp_movie::DecodedVideoFrame>();
+        auto frame = std::make_unique<ilp_movie::Frame>();
         if (!decoderEntry.decoder->DecodeVideoFrame(
-              key.video_stream_index, key.frame_nb, /*out*/ *dvf)) {
+              key.video_stream_index, key.frame_nb, /*out*/ *frame)) {
           result.error = std::make_shared<std::string>("Cannot seek to frame");
           return result;
         }
-        result.frame.reset(dvf.release());// NOLINT
-      } catch (std::exception &) {
-        result.error = std::make_shared<std::string>("Cannot initialize decoder");
+        result.frame.reset(frame.release());// NOLINT
+      } catch (std::exception &ex) {
+        result.error = std::make_shared<std::string>(ex.what());
         return result;
       }
       return result;

@@ -6,7 +6,7 @@
 
 #include "ilp_gaffer_movie/ilp_gaffer_movie_export.hpp"
 
-#include "ilp_movie/decoder.hpp"// ilp_movie::Decoder, ilp_movie::DecodedVideoFrame
+#include "ilp_movie/frame.hpp"// ilp_movie::Frame
 
 #include "internal/SharedDecoders.h"
 
@@ -25,7 +25,7 @@ namespace shared_frames_internal {
   // For failure, frame should be left null, and error should be set.
   struct FrameCacheEntry
   {
-    std::shared_ptr<ilp_movie::DecodedVideoFrame> frame;
+    std::shared_ptr<ilp_movie::Frame> frame;
     std::shared_ptr<std::string> error;
   };
 
