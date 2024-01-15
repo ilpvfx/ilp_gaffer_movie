@@ -89,6 +89,7 @@ MovieReader::MovieReader(const std::string &name) : GafferImage::ImageNode(name)
   using ColorSpacePtr = GafferImage::ColorSpacePtr;
 
   storeIndexOfNextChild(g_FirstPlugIndex);
+  
   addChild(new StringPlug(// [0]
     /*name=*/"fileName",
     /*direction=*/Plug::In));

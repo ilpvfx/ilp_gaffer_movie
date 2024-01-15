@@ -27,17 +27,6 @@ struct FramePair
   ilp_movie::Frame demux_frame = {};
 };
 
-// Use with:
-// - FrameT = ilp_movie::Frame
-// - FrameT = ilp_movie::FrameView
-template<typename PixelT, typename FrameT>
-[[nodiscard]] auto CompPixelData(const FrameT &frame,
-  const ilp_movie::Comp::ValueType comp) noexcept -> ilp_movie::PixelData<PixelT>
-{
-  return ilp_movie::CompPixelData<PixelT>(
-    frame.data, frame.linesize, comp, frame.hdr.height, frame.hdr.pix_fmt_name);
-}
-
 // NOTE(tohi): Makes RGB frames for now, could add possibility to
 //             make RGBA frames if necessary.
 [[nodiscard]] auto MakeFramePair(const int w,
@@ -103,6 +92,7 @@ template<typename PixelT, typename FrameT>
     return rgba;
   };
 
+  using ilp_movie::CompPixelData;
   const auto r = CompPixelData<float>(fp.demux_frame, ilp_movie::Comp::kR);
   const auto g = CompPixelData<float>(fp.demux_frame, ilp_movie::Comp::kG);
   const auto b = CompPixelData<float>(fp.demux_frame, ilp_movie::Comp::kB);
@@ -192,6 +182,8 @@ auto SeekFrames(ilp_movie::Decoder &decoder, const int stream_index, const int f
           /*out*/ fp)) {
       return {};
     }
+
+    using ilp_movie::CompPixelData;
 
     // The data we read...
     const auto r_seek = CompPixelData<const float>(seek_frame, ilp_movie::Comp::kR);

@@ -50,6 +50,32 @@
 
 namespace ilp_movie {
 
+#if 0
+// TODO(tohi): Re-write the muxer interface to be a class instead, similar to how the decoder (which should
+//             be called demuxer) is structured. This is much easier to work with.
+
+class MuxerImpl;
+class ILP_MOVIE_EXPORT Muxer
+{
+public:
+  Muxer();
+  ~Muxer();
+
+  // Movable.
+  Muxer(Muxer &&rhs) noexcept = default;
+  Muxer &operator=(Muxer &&rhs) noexcept = default;
+
+  // Not copyable.
+  Muxer(const Muxer &rhs) = delete;
+  Muxer &operator=(const Muxer &rhs) = delete;
+
+  [[nodiscard]] auto Open(const std::string &url) -> bool;
+
+  [[nodiscard]] auto EncodeVideoFrame(int stream_index, const FrameView& frame_view) noexcept -> bool;
+};
+#endif
+
+
 namespace ProRes {
   namespace ProfileName {
     // clang-format off

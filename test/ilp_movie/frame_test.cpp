@@ -12,22 +12,24 @@ TEST_CASE("GetBufferSize")
   SECTION("rgb")
   {
     const char *pix_fmt_name = ilp_movie::PixFmt::kRGB_P_F32;
+    constexpr std::size_t p = 3;
 
-    const std::size_t expected_buf_size = static_cast<std::size_t>(w)
-                                          * static_cast<std::size_t>(h) * 3 * sizeof(float);
+    const std::size_t expected_buf_size =
+      static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * p * sizeof(float);
 
-    const std::size_t get_buf_size = ilp_movie::GetBufferSize(pix_fmt_name, w, h).value();
+    const std::size_t get_buf_size = ilp_movie::GetBufferSize(pix_fmt_name, w, h).value_or(0U);
     REQUIRE(get_buf_size == expected_buf_size);
   }
 
   SECTION("rgba")
   {
     const char *pix_fmt_name = ilp_movie::PixFmt::kRGBA_P_F32;
+    constexpr std::size_t p = 4;
 
-    const std::size_t expected_buf_size = static_cast<std::size_t>(w)
-                                          * static_cast<std::size_t>(h) * 4 * sizeof(float);
+    const std::size_t expected_buf_size =
+      static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * p * sizeof(float);
 
-    const std::size_t get_buf_size = ilp_movie::GetBufferSize(pix_fmt_name, w, h).value();
+    const std::size_t get_buf_size = ilp_movie::GetBufferSize(pix_fmt_name, w, h).value_or(0U);
     REQUIRE(get_buf_size == expected_buf_size);
   }
 
@@ -36,6 +38,8 @@ TEST_CASE("GetBufferSize")
     REQUIRE(!ilp_movie::GetBufferSize("not_a_pix_fmt_name", w, h).has_value());
     REQUIRE(!ilp_movie::GetBufferSize(ilp_movie::PixFmt::kRGB_P_F32, -1, h).has_value());
     REQUIRE(!ilp_movie::GetBufferSize(ilp_movie::PixFmt::kRGB_P_F32, w, -1).has_value());
+    REQUIRE(!ilp_movie::GetBufferSize(ilp_movie::PixFmt::kRGB_P_F32, 0, h).has_value());
+    REQUIRE(!ilp_movie::GetBufferSize(ilp_movie::PixFmt::kRGB_P_F32, w, 0).has_value());
   }
 }
 
@@ -156,7 +160,8 @@ TEST_CASE("CompPixelData")
     REQUIRE(r.count == h * (line2 / sizeof(float)));
   }
 
-  SECTION("rgba") {
+  SECTION("rgba")
+  {
     f.hdr.pix_fmt_name = ilp_movie::PixFmt::kRGBA_P_F32;
     f.buf = std::make_unique<uint8_t[]>(// NOLINT
       ilp_movie::GetBufferSize(f.hdr.pix_fmt_name, f.hdr.width, f.hdr.height).value());

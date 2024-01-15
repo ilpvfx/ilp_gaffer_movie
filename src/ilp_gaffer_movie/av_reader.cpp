@@ -542,6 +542,8 @@ std::optional<int> AvReader::_videoStreamIndex(const Gaffer::Context *context) c
   std::optional<int> idx{};
   const std::string str = context->substitute(videoStreamPlug()->getValue());
   if (str == "best") {
+    // This special value is used to communicate to the decoder to use the "best"
+    // video stream, as determined by the decoder itself.
     idx = -1;
   } else {
     int p{};
@@ -569,7 +571,8 @@ std::shared_ptr<void> AvReader::_retrieveDecoder(const Gaffer::Context *context)
   if (fileName.empty()) { return nullptr; }
   std::string resolvedFileName = context->substitute(fileName);
 
-  // CHECK ALPHA!?!? stream header?!?
+  // TODO(tohi): We are never including alpha values here. We 
+  //             would need a way to check if this is needed.
 
   static const std::string kPixFmtName = "gbrpf32le";
 

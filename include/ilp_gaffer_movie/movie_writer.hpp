@@ -8,21 +8,15 @@
 #include <GafferImage/ImagePlug.h>
 
 // #include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
-#include <ilp_gaffer_movie/ilp_gaffer_movie_export.hpp>
-#include <ilp_gaffer_movie/type_id.hpp>
-
-namespace Gaffer {
-// IE_CORE_FORWARDDECLARE(IntPlug)
-IE_CORE_FORWARDDECLARE(StringPlug)
-// IE_CORE_FORWARDDECLARE(ValuePlug)
-}// namespace Gaffer
-
-namespace GafferImage {
-// IE_CORE_FORWARDDECLARE(ColorSpace)
-IE_CORE_FORWARDDECLARE(ImagePlug)
-}// namespace GafferImage
+#include "ilp_gaffer_movie/ilp_gaffer_movie_export.hpp"
+#include "ilp_gaffer_movie/type_id.hpp"
 
 namespace IlpGafferMovie {
+
+// Convenience macro for declaring plug member functions.
+#define PLUG_MEMBER_DECL(name, type) \
+  type *name();                      \
+  const type *name() const;
 
 class ILPGAFFERMOVIE_EXPORT MovieWriter : public GafferDispatch::TaskNode
 {
@@ -36,41 +30,19 @@ public:
 
   IECore::MurmurHash hash(const Gaffer::Context *context) const override;
 
-  GafferImage::ImagePlug *inPlug();
-  const GafferImage::ImagePlug *inPlug() const;
+  PLUG_MEMBER_DECL(inPlug, GafferImage::ImagePlug);
+  PLUG_MEMBER_DECL(fileNamePlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(colorRangePlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(colorspacePlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(colorTrcPlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(colorPrimariesPlug, Gaffer::StringPlug);
+  PLUG_MEMBER_DECL(filtergraphPlug, Gaffer::StringPlug);
 
-  Gaffer::StringPlug *fileNamePlug();
-  const Gaffer::StringPlug *fileNamePlug() const;
+  PLUG_MEMBER_DECL(codecPlug, Gaffer::StringPlug);
+  Gaffer::ValuePlug *codecSettingsPlug(const std::string &codecName);
+  const Gaffer::ValuePlug *codecSettingsPlug(const std::string &codecName) const;
 
-  // Gaffer::StringPlug *formatPlug();
-  // const Gaffer::StringPlug *formatPlug() const;
-
-  Gaffer::StringPlug *colorRangePlug();
-  const Gaffer::StringPlug *colorRangePlug() const;
-
-  Gaffer::StringPlug *colorspacePlug();
-  const Gaffer::StringPlug *colorspacePlug() const;
-
-  Gaffer::StringPlug *colorPrimariesPlug();
-  const Gaffer::StringPlug *colorPrimariesPlug() const;
-
-  Gaffer::StringPlug *colorTrcPlug();
-  const Gaffer::StringPlug *colorTrcPlug() const;
-
-  Gaffer::StringPlug *swsFlagsPlug();
-  const Gaffer::StringPlug *swsFlagsPlug() const;
-
-  Gaffer::StringPlug *filtergraphPlug();
-  const Gaffer::StringPlug *filtergraphPlug() const;
-
-  Gaffer::StringPlug *codecPlug();
-  const Gaffer::StringPlug *codecPlug() const;
-
-  GafferImage::ImagePlug *outPlug();
-  const GafferImage::ImagePlug *outPlug() const;
-
-  Gaffer::ValuePlug *codecSettingsPlug(const std::string &codec_name);
-  const Gaffer::ValuePlug *codecSettingsPlug(const std::string &codec_name) const;
+  PLUG_MEMBER_DECL(outPlug, GafferImage::ImagePlug);
 
 protected:
   void execute() const override;
@@ -78,14 +50,17 @@ protected:
   void executeSequence(const std::vector<float> &frames) const override;
 
   // Re-implemented to return true, since the entire movie file must be written at once.
-  bool requiresSequenceExecution() const override;
+  bool requiresSequenceExecution() const override { return true; } 
 
 private:
-  static std::size_t FirstPlugIndex;
+  static std::size_t g_FirstPlugIndex;
 
   // Friendship for the bindings.
   friend struct GafferDispatchBindings::Detail::TaskNodeAccessor;
 };
+
+// Keep macro local.
+#undef PLUG_MEMBER_DECL
 
 IE_CORE_DECLAREPTR(MovieWriter)
 

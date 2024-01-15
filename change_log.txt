@@ -1,6 +1,10 @@
 ILP Gaffer Movie History
 ========================
 
+Version 0.3.0
+    - Add an ambitious README page relevant for continuing this project.
+    - Document code and add suggestions for improvements.
+
 Version 0.2.0
     IlpGafferMovie
     - MovieReader node handles "automatic" color space. Currently just assumes that video 

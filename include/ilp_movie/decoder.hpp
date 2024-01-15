@@ -79,18 +79,20 @@ public:
   Decoder(const Decoder &rhs) = delete;
   Decoder &operator=(const Decoder &rhs) = delete;
 
+  // Open a file with the given URL (file name) and initialize the internal state
+  // required to start decoding frames. Returns true if successful; otherwise false.
   [[nodiscard]] auto Open(const std::string &url,
     const DecoderFilterGraphDescription &dfgd) noexcept -> bool;
 
   // Returns true if the decoder has been successfully opened and has not been closed since.
   [[nodiscard]] auto IsOpen() const noexcept -> bool;
 
-  // The URL (file name) that is currently open, empty if the decoder
-  // is not in an open state.
+  // The URL (file name) that is currently open.
+  // Empty string if no file is currently open.
   [[nodiscard]] auto Url() const noexcept -> const std::string &;
 
-  // Information about the opened file and the streams within. Empty string if no file is
-  // currently open.
+  // Information about the opened file and the streams within. 
+  // Empty string if no file is currently open.
   [[nodiscard]] auto Probe() const noexcept -> const std::string &;
 
   // Reset the state of the decoder, clearing all cached information and putting the
@@ -100,10 +102,10 @@ public:
   // Returns the video stream index considered to be "best", which is implementation defined.
   // If no such index can be determined returns a negative number. For instance, this could happen
   // if the opened file contains no video streams, or if no file has been opened.
-  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> int;
+  [[nodiscard]] auto BestVideoStreamIndex() const noexcept -> std::optional<int>;
 
-  // Returns the header information for the video streams in the currently opened file.
-  // The list is empty if no file has been opened.
+  // Returns the video stream headers for the currently opened file.
+  // The list is empty if no file is currently open.
   //
   // Note that some properties, such as pixel format, may differ from the decoded frames,
   // since those are potentially pushed through a filter graph.
